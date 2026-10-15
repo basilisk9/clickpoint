@@ -1,5 +1,7 @@
 # fly.toml — deploy config for Fly.io.
-# Rename `app` to a globally unique name before deploying.
+# `app` must be globally unique across Fly. Pick your own before deploying,
+# e.g. "clickpoint-<yourhandle>", then run `fly launch --no-deploy` to adopt it.
+# The placeholder below will collide and is expected to be changed.
 
 app = "clickpoint"
 primary_region = "sin"

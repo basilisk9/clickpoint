@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { gradeQuiz } from "@/lib/grade";
+import { gradeQuestion, gradeQuiz } from "@/lib/grade";
 import { requireGuest } from "@/lib/guest";
 import { unlockNextCard } from "@/lib/pipeline";
 import { getPathway, publicPathway, savePathway } from "@/lib/store";
@@ -20,6 +20,8 @@ export async function POST(
 
     const body = (await request.json()) as {
       nodeId?: string;
+      questionId?: string;
+      answer?: string;
       answers?: Record<string, string>;
     };
     const node = pathway.nodes.find((item) => item.id === body.nodeId);
@@ -30,6 +32,18 @@ export async function POST(
       return NextResponse.json({ error: "Finish the lesson first." }, { status: 400 });
     }
 
+    /* ---- One-question mode: the card-by-card UI checks as it goes. ---- */
+    if (typeof body.questionId === "string") {
+      const verdict = gradeQuestion(node.quiz, body.questionId, body.answer ?? "");
+      if (!verdict) {
+        return NextResponse.json({ error: "Unknown question." }, { status: 400 });
+      }
+      /* XP and unlocking are settled by the final batch call, so a
+         mid-quiz check never mutates progression. */
+      return NextResponse.json({ verdict });
+    }
+
+    /* ---- Batch mode: grades the whole set and settles progression. ---- */
     const result = gradeQuiz(node.quiz, body.answers || {});
     const latest = (await getPathway(id)) ?? pathway;
     const liveNode = latest.nodes.find((item) => item.id === node.id) ?? node;
@@ -52,3 +66,4 @@ export async function POST(
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
+

@@ -165,6 +165,13 @@ Allowed types only:
 - "mcq": conceptual discrimination, 3-5 choices, exactly one correctIndex
 - "numeric": the student types a number. Units are displayed by the host and ignored in grading. Put the expected number in "answer". Optional "unit" label. Optional "tolerance" (absolute). Default tolerance is 1% of |answer| or 0.01.
 
+Every question also carries a short "tag" — one or two words naming the skill it tests,
+e.g. "Concept", "Compute", "Insight", "Edge case", "Counterexample", "Transfer".
+The host renders it as a colored pill, so keep it under 14 characters.
+
+Prompts, choices and explanations are richtext: plain sentences plus $...$ for inline
+math and $$...$$ for display math, **bold**, *italic*. No HTML tags, ever.
+
 Mix both types. Every question must be traceable to the source notes and the assigned topic.
 
 Return JSON only:
@@ -173,6 +180,7 @@ Return JSON only:
     {
       "id": "q1",
       "type": "mcq",
+      "tag": "Concept",
       "prompt": "...",
       "choices": ["A", "B", "C", "D"],
       "correctIndex": 1,
@@ -181,6 +189,7 @@ Return JSON only:
     {
       "id": "q2",
       "type": "numeric",
+      "tag": "Compute",
       "prompt": "How far does it stop?",
       "answer": 4.89,
       "unit": "m",

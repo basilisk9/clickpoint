@@ -266,6 +266,7 @@ function normalizeQuiz(raw: QuizPayload): QuizPayload {
       questions.push({
         id: asString(item.id, `q${index + 1}`),
         type: "mcq",
+        tag: asString(item.tag) || undefined,
         prompt: asString(item.prompt, "Choose the best framing."),
         choices: item.choices.map((choice) => asString(choice)).filter(Boolean),
         correctIndex: Math.max(0, Number(item.correctIndex) || 0),
@@ -277,6 +278,7 @@ function normalizeQuiz(raw: QuizPayload): QuizPayload {
       questions.push({
         id: asString(item.id, `q${index + 1}`),
         type: "numeric",
+        tag: asString(item.tag) || undefined,
         prompt: asString(item.prompt, "Find the value."),
         answer: Number(item.answer),
         unit: asString(item.unit) || undefined,

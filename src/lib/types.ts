@@ -41,6 +41,9 @@ export type QuizChoiceQuestion = {
   choices: string[];
   correctIndex: number;
   explanation: string;
+  /* Short label shown as a colored pill above the prompt (e.g. "Compute").
+     Optional so older records without tags still render. */
+  tag?: string;
 };
 
 export type QuizNumericQuestion = {
@@ -51,6 +54,7 @@ export type QuizNumericQuestion = {
   unit?: string;
   tolerance?: number;
   explanation: string;
+  tag?: string;
 };
 
 export type QuizQuestion = QuizChoiceQuestion | QuizNumericQuestion;

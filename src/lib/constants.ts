@@ -8,3 +8,9 @@ export const QUIZ_PASS_THRESHOLD = 0.75;
 export const MIN_LESSONS = 2;
 export const MAX_LESSONS = 10;
 export const QUESTIONS_PER_QUIZ = 8;
+
+/* Hearts in the checkpoint. Three misses ends the run — the same stakes
+   the reference design uses, which keeps each question consequential
+   without making a single slip fatal. */
+export const QUIZ_LIVES = 3;
+

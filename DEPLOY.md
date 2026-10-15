@@ -3,7 +3,11 @@
 The app is a long-lived Node server, not a serverless function. `pipeline.ts`
 uses fire-and-forget `void generateRemaining(...)` to build later cards while
 the user reads card 1. That work dies the moment a serverless response returns,
-so this needs a container host (Fly.io, Railway) rather than Vercel/Netlify.
+so this needs a container host (Fly.io, Railway, Render) rather than
+Vercel/Netlify. Vercel's `waitUntil`/`after()` can extend an invocation, but only
+up to the route's `maxDuration` (300s on Hobby) — a pathway takes ~2.5 min today
+and would fail silently if it ever overran that ceiling. Once `store.ts` talks
+to a real database instead of the local filesystem, Vercel becomes viable.
 
 ## What the app needs
 
@@ -17,33 +21,87 @@ so this needs a container host (Fly.io, Railway) rather than Vercel/Netlify.
 `DATA_DIR` is the whole ballgame. Unset, records go to the container's
 ephemeral disk and **every user's progress is wiped on the next deploy**.
 
-## Fly.io
+## Fly.io — current deployment
+
+Deployed and verified at **https://clickpoint.fly.dev** (app `clickpoint`, region
+`ams`, volume `clickpoint_data`).
+
+### Redeploying
 
 ```sh
-# 1. Install + log in (once).
-#    https://fly.io/docs/flyctl/install/
-fly auth login
-
-# 2. Pick a globally unique name and set it in fly.toml (`app = ...`).
-#    Then adopt the config without deploying.
-fly launch --no-deploy
-
-# 3. Create the volume. Must match the `source` in fly.toml's [mounts].
-fly volumes create clickpoint_data --size 1 --region sin
-
-# 4. Set the secret. Never commit this.
-fly secrets set LOGFARE_API_KEY=sk-hc-v1-...
-
-# 5. Deploy.
-fly deploy
-
-# 6. Confirm it is up.
-fly open
-fly logs
+fly deploy --remote-only
 ```
 
-The Dockerfile builds the image remotely, so a Dockerfile error shows up here
-rather than locally. If the build fails, `fly logs` shows the failing step.
+The image builds on Fly's remote builder (~2 min: `npm ci`, `next build`,
+export). A local Docker daemon is not needed.
+
+### The `internal_port` trap — read this before regenerating `fly.toml`
+
+`fly launch` / the dashboard "Deploy from GitHub" flow generates a `fly.toml`
+with **`internal_port = 8080`**. The Dockerfile ends with `ENV PORT=3000` and
+`EXPOSE 3000`, so the container listens on **3000**. The result is a confusing
+half-failure:
+
+- the app logs `✓ Ready in 407ms` and looks perfectly healthy;
+- Fly's proxy logs `instance refused connection. is your app listening on
+  0.0.0.0:8080?` on every request;
+- the public URL hangs, then returns 502 — or does not resolve at all if the
+  app also has no public IPs allocated.
+
+`fly.toml` in this repo pins `internal_port = 3000`. If you ever regenerate it,
+fix that line. Symptom to remember: **app says Ready, but nothing is reachable.**
+
+### Things the dashboard flow does not do
+
+Deploying via the Fly dashboard skipped two steps; both are now done, but a
+fresh app will need them:
+
+```sh
+# Public IPs. Without these the app has no DNS record at all —
+# `clickpoint.fly.dev` returns NXDOMAIN even though the machine is "started".
+fly ips allocate-v4 --shared -a clickpoint
+fly ips allocate-v6 -a clickpoint
+
+# The LLM key. Not in the repo; the app cannot generate a pathway without it.
+fly secrets set LOGFARE_API_KEY=sk-hc-v1-... -a clickpoint
+```
+
+The dashboard flow *does* create and attach the volume and mount it at `/data`,
+so `DATA_DIR` is handled for you.
+
+### Verifying a deployment
+
+```sh
+curl -s https://clickpoint.fly.dev/api/pathways
+# {"guestId":"gst_...","pathways":[]}
+
+# Confirm records are landing on the persistent volume, not ephemeral disk:
+fly ssh console -a clickpoint -C 'find /data -type f'
+# /data/guests/gst_....json
+```
+
+Pathway generation takes **~2.5 minutes** (outline + first lesson synchronously,
+remaining cards in the background). A `POST` that seems to hang is normal; check
+`find /data -type f` for a new `pathways/path_*.json` rather than assuming a
+failure.
+
+### Rate-limit check
+
+The guest cookie is named **`clickpoint_guest`** (not `cp_guest`). A second
+`POST` from the same guest within 24h returns:
+
+```sh
+curl -s -w '\nHTTP %{http_code}\n' -X POST https://clickpoint.fly.dev/api/pathways \
+  -H 'Content-Type: application/json' \
+  -H 'cookie: clickpoint_guest=gst_...' \
+  --data-binary '{"notes":"..."}'
+# {"error":"You've already built a pathway today. You can build your next one in 23h 56m.","retryAt":"..."}
+# HTTP 429
+```
+
+An unrecognized or missing cookie mints a **new** guest instead of erroring, so
+a wrong cookie name looks like the limit silently not working. Check that the
+`guestId` in the response matches the cookie you sent.
 
 ## Railway
 
@@ -56,7 +114,7 @@ Connect the GitHub repo, then:
 ## After deploying, verify
 
 ```sh
-curl -s https://<your-app>/api/pathways
+curl -s https://clickpoint.fly.dev/api/pathways
 ```
 
 Expect `{"guestId":"gst_...","pathways":[]}`. Then load the site, paste notes,
@@ -68,6 +126,29 @@ and confirm a pathway builds. Re-running the same POST within 24h should return
 - **No accounts.** Identity is a guest cookie, so clearing cookies resets both
   the library and the daily limit. Real enforcement needs the sign-up work.
 - **No database.** Records are JSON on the volume; `rawNotes` is retained in
-  full for every pathway.
-- **The Dockerfile has not been executed locally** (no running Docker daemon
-  during development), so treat the first `fly deploy` as the real test.
+  full for every pathway and is never cleared. With accounts this becomes a
+  privacy claim, so decide retention before shipping sign-up.
+- **`getGuest` swallows every error and returns `null`** (`store.ts`). A
+  truncated or corrupt guest file silently hands that user a brand-new empty
+  library with no error logged anywhere. Narrow the catch to `ENOENT` only.
+- **Single machine only.** File-per-record storage means last-write-wins with no
+  locking, and the background generator is in-process. Running two machines
+  would have them fight over the same volume.
+- **Browser click-through not done.** The quiz fail path (lose 3 hearts →
+  "Out of hearts") and the results screen (XP count-up, question log) have only
+  been verified via API and SSR HTML, not a real browser.
+
+## Verified working (2026-10-15)
+
+Deployed to Fly and confirmed live, end to end:
+
+- Image builds remotely — `npm ci` + `next build` + export, 181 MB.
+- `GET /` → 200; `GET /api/pathways` → `{"guestId":"gst_...","pathways":[]}`.
+- A real pathway generated from pasted notes: `status: "ready"` in ~2.5 min.
+- Records persist to the mounted volume (`/data/guests/*.json`,
+  `/data/pathways/*.json`) and survive machine restart.
+- Rate limit: second POST from the same guest → `429` with a 23h 56m countdown.
+- `lastPathwayAt` is stamped ~17s **before** the pathway's `createdAt`,
+  confirming the "stamp before generation" ordering — a run that fails partway
+  still counts against the limit.
+

@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+/* KaTeX ships its own stylesheet; importing it here means every rendered
+   card gets correct math spacing without the model ever emitting a <link>. */
+@import "katex/dist/katex.min.css";
+
+:root {
+  --bg: #eef3f1;
+  --ink: #10231f;
+  --muted: #5d726c;
+  --line: #c9d6d1;
+  --card: #ffffff;
+  --teal: #0f766e;
+  --banner: #10242c;
+  --grid: rgba(16, 35, 31, 0.06);
+
+  /* Card surface tokens — a slightly cooler paper than the app background so
+     a card reads as its own document sitting on the grid. */
+  --paper: #f2f5f3;
+  --paper2: #e7edea;
+  --card-surface: #fbfdfc;
+  --ink-soft: #4c656e;
+  --ink-faint: #8299a1;
+  --card-line: #ccd9d3;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Accent palette for card identity. A card picks ONE of these; the renderer
+     maps it to consistent classes, so no card ever carries its own CSS. */
+  --color-pine: #0e7b6c;
+  --color-pine-deep: #0a5c51;
+  --color-pine-soft: #d9e9e3;
+  --color-ember: #e8590c;
+  --color-ember-soft: #fbe6d7;
+  --color-cobalt: #1c7ed6;
+  --color-blood: #c92a2a;
+  --color-gold: #f0a020;
+  --color-deep: #0d2029;
+  --color-deep2: #123039;
+  --color-deep-line: #264854;
+  --color-mist: #e9f2ef;
+  --color-mist-soft: #9db8b1;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; }
+
+body {
+  margin: 0;
+  background:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+    var(--bg);
+  background-size: 28px 28px, 28px 28px, auto;
+  color: var(--ink);
+  font-family: var(--font-geist-sans), Georgia, "Times New Roman", serif;
+}
+
+a { color: inherit; }
+button, input, textarea { font: inherit; }
+
+.shell {
+  width: min(1120px, calc(100% - 48px));
+  margin: 0 auto;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.grid-page { min-height: 100vh; }
+
+/* ---------------------------------------------------------------- */
+/* Card motion + controls. Ported from the reference design system   */
+/* so model-authored content can ask for these by name only.         */
+/* ---------------------------------------------------------------- */
+
+@keyframes cpReveal {
+  from { opacity: 0; transform: translateY(22px); }
+  to   { opacity: 1; transform: none; }
+}
+.reveal { opacity: 0; transform: translateY(22px);
+  transition: opacity .7s ease, transform .7s cubic-bezier(.22,.9,.3,1); }
+.reveal.on { opacity: 1; transform: none; }
+
+@keyframes cpPulseRing {
+  0%   { box-shadow: 0 0 0 0 rgba(14,123,108,.4); }
+  75%  { box-shadow: 0 0 0 18px rgba(14,123,108,0); }
+  100% { box-shadow: 0 0 0 0 rgba(14,123,108,0); }
+}
+.pulse-ring { animation: cpPulseRing 1.9s ease-out infinite; }
+
+@keyframes cpSlideUp {
+  from { transform: translateY(110%); }
+  to   { transform: translateY(0); }
+}
+.slide-up { animation: cpSlideUp .35s cubic-bezier(.22,.9,.3,1); }
+
+@keyframes cpPopIn {
+  from { transform: scale(.55); opacity: 0; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.pop-in { animation: cpPopIn .32s cubic-bezier(.22,.9,.3,1.35); }
+
+@keyframes cpShakeX {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-6px); }
+  40%, 60% { transform: translateX(6px); }
+}
+.shake { animation: cpShakeX .5s ease; }
+
+input[type="range"] { accent-color: var(--color-pine); }

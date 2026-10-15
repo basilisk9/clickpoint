@@ -2,6 +2,11 @@
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
+# NOTE: `internal_port` below is 3000, not the 8080 that `fly launch` generates.
+# The Dockerfile ends with `ENV PORT=3000` + `EXPOSE 3000`, so the container
+# listens on 3000. With 8080 here, Fly's proxy gets connection-refused and every
+# request 502s ("instance refused connection") while the app itself logs
+# "✓ Ready". If you regenerate this file, check this value first.
 
 app = 'clickpoint'
 primary_region = 'ams'
@@ -22,7 +27,7 @@ primary_region = 'ams'
   destination = '/data'
 
 [http_service]
-  internal_port = 8080
+  internal_port = 3000
   force_https = true
   auto_stop_machines = 'suspend'
   auto_start_machines = true

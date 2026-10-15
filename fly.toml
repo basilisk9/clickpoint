@@ -1,43 +1,38 @@
-# fly.toml — deploy config for Fly.io.
-# `app` must be globally unique across Fly. Pick your own before deploying,
-# e.g. "clickpoint-<yourhandle>", then run `fly launch --no-deploy` to adopt it.
-# The placeholder below will collide and is expected to be changed.
+# fly.toml app configuration file generated for clickpoint on 2026-10-15T08:08:18Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
 
-app = "clickpoint"
-primary_region = "sin"
+app = 'clickpoint'
+primary_region = 'ams'
 
 [build]
 
 [env]
-  PORT = "3000"
-  HOSTNAME = "0.0.0.0"
-  DATA_DIR = "/data"
-  # Non-secret config can live here; secrets go through `fly secrets set`.
-  LOGFARE_BASE_URL = "https://ai.hackclub.com/proxy/v1"
-  LOGFARE_MODEL = "deepseek/deepseek-v4.1-flash"
-  LOGFARE_DISABLE_THINKING = "true"
-  LOGFARE_FALLBACK_MODELS = ""
+  DATA_DIR = '/data'
+  HOSTNAME = '0.0.0.0'
+  LOGFARE_BASE_URL = 'https://ai.hackclub.com/proxy/v1'
+  LOGFARE_DISABLE_THINKING = 'true'
+  LOGFARE_FALLBACK_MODELS = ''
+  LOGFARE_MODEL = 'deepseek/deepseek-v4.1-flash'
+  PORT = '3000'
 
-[mounts]
-  # Persistent volume. Without this, every redeploy wipes all user progress.
-  source = "clickpoint_data"
-  destination = "/data"
+[[mounts]]
+  source = 'clickpoint_data'
+  destination = '/data'
 
 [http_service]
-  internal_port = 3000
+  internal_port = 8080
   force_https = true
-  auto_stop_machines = "suspend"
+  auto_stop_machines = 'suspend'
   auto_start_machines = true
   min_machines_running = 1
 
-  # Pathway generation calls the LLM for every remaining lesson and can run
-  # for minutes. The app returns early and finishes in the background, so a
-  # generous request timeout is safe here.
   [http_service.concurrency]
-    type = "requests"
-    soft_limit = 40
+    type = 'requests'
     hard_limit = 60
+    soft_limit = 40
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "1gb"
+  size = 'shared-cpu-1x'
+  memory = '1gb'

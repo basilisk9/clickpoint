@@ -14,3 +14,8 @@ export const QUESTIONS_PER_QUIZ = 8;
    without making a single slip fatal. */
 export const QUIZ_LIVES = 3;
 
+/* Rate limit: one new pathway per guest per rolling window. Each pathway
+   fires an outline, a banner, and a card + quiz per lesson, so this is the
+   knob that caps LLM spend. */
+export const PATHWAY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+

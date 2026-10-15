@@ -12,7 +12,7 @@ import {
   quizUser,
 } from "./prompts";
 import { sanitizeBannerSvg } from "./sanitize";
-import { getPathway, saveGuest, savePathway } from "./store";
+import { getGuest, getPathway, saveGuest, savePathway } from "./store";
 import type {
   CardAccent,
   CardExample,
@@ -426,8 +426,14 @@ export async function createPathwayFromNotes(guest: GuestRecord, rawNotes: strin
   };
 
   await savePathway(pathway);
-  guest.pathwayIds = [pathway.id, ...guest.pathwayIds.filter((id) => id !== pathway.id)];
-  await saveGuest(guest);
+
+  /* Re-read before writing so we append to the freshest record. The route
+     stamps lastPathwayAt on the guest before calling us, and another request
+     could have touched it since — writing our stale copy would drop that. */
+  const fresh = (await getGuest(guest.id)) ?? guest;
+  fresh.pathwayIds = [pathway.id, ...fresh.pathwayIds.filter((id) => id !== pathway.id)];
+  await saveGuest(fresh);
+  guest.pathwayIds = fresh.pathwayIds;
 
   await fillLesson(pathway.id, 0);
   const ready = await getPathway(pathway.id);

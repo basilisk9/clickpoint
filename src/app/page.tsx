@@ -32,6 +32,9 @@ export default function Home() {
               <li>3. You learn. Later cards generate in the background.</li>
               <li>4. Every card is followed by an 8-question checkpoint.</li>
             </ol>
+            <p className="mt-5 text-sm leading-6 text-[#93a7b4]">
+              One pathway per day. Build it, walk it, come back tomorrow.
+            </p>
             <Link href="/library" className="mt-8 inline-flex text-sm font-bold text-[#7dcea0]">
               Open your library →
             </Link>

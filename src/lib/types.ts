@@ -110,6 +110,9 @@ export type GuestRecord = {
   id: string;
   createdAt: string;
   pathwayIds: string[];
+  /* Rolling 24h rate limit: when this guest last *started* a generation.
+     Optional so pre-existing records without it still parse. */
+  lastPathwayAt?: string;
 };
 
 /* ------------------------------------------------------------------ */

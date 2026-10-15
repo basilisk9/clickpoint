@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { extractNotesFromUpload } from "@/lib/extract";
 import { getOrCreateGuest } from "@/lib/guest";
 import { createPathwayFromNotes } from "@/lib/pipeline";
-import { listPathwaysForGuest, publicPathway } from "@/lib/store";
+import { checkPathwayLimit } from "@/lib/ratelimit";
+import { listPathwaysForGuest, publicPathway, saveGuest } from "@/lib/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -16,6 +17,16 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const guest = await getOrCreateGuest();
+
+    /* Checked before any LLM work so a blocked request costs nothing. */
+    const limit = checkPathwayLimit(guest);
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: limit.message, retryAt: limit.retryAt },
+        { status: 429 },
+      );
+    }
+
     const contentType = request.headers.get("content-type") || "";
     let notes = "";
 
@@ -33,6 +44,11 @@ export async function POST(request: Request) {
       const body = (await request.json()) as { notes?: string };
       notes = String(body.notes || "").trim();
     }
+
+    /* Stamped before generating, so a run that fails partway still counts.
+       Otherwise repeated failures would each burn the full LLM budget. */
+    guest.lastPathwayAt = new Date().toISOString();
+    await saveGuest(guest);
 
     const pathway = await createPathwayFromNotes(guest, notes);
     return NextResponse.json({ pathway: publicPathway(pathway) });

@@ -1,0 +1,41 @@
+# fly.toml — deploy config for Fly.io.
+# Rename `app` to a globally unique name before deploying.
+
+app = "clickpoint"
+primary_region = "sin"
+
+[build]
+
+[env]
+  PORT = "3000"
+  HOSTNAME = "0.0.0.0"
+  DATA_DIR = "/data"
+  # Non-secret config can live here; secrets go through `fly secrets set`.
+  LOGFARE_BASE_URL = "https://ai.hackclub.com/proxy/v1"
+  LOGFARE_MODEL = "deepseek/deepseek-v4.1-flash"
+  LOGFARE_DISABLE_THINKING = "true"
+  LOGFARE_FALLBACK_MODELS = ""
+
+[mounts]
+  # Persistent volume. Without this, every redeploy wipes all user progress.
+  source = "clickpoint_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  # Pathway generation calls the LLM for every remaining lesson and can run
+  # for minutes. The app returns early and finishes in the background, so a
+  # generous request timeout is safe here.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 60
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

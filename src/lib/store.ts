@@ -2,7 +2,13 @@ import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import type { GuestRecord, PathwayRecord, PathwaySummary } from "./types";
 
-const dataRoot = path.join(process.cwd(), "data");
+/* Where guest + pathway JSON lives. Defaults to ./data for local dev; set
+   DATA_DIR to a mounted volume path in production so records survive
+   restarts and redeploys. Without it, a container's ephemeral disk silently
+   discards every user's progress on the next deploy. */
+const dataRoot = process.env.DATA_DIR
+  ? path.resolve(process.env.DATA_DIR)
+  : path.join(process.cwd(), "data");
 const guestsDir = path.join(dataRoot, "guests");
 const pathwaysDir = path.join(dataRoot, "pathways");
 

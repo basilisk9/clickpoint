@@ -48,5 +48,6 @@ next-env.d.ts
 
 # local run artifacts
 dev-server.log
+_dev.log
 npm-install.log
 npm-install.err

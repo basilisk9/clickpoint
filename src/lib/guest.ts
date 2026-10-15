@@ -24,6 +24,9 @@ export async function getOrCreateGuest(): Promise<GuestRecord> {
       sameSite: "lax",
       path: "/",
       maxAge: COOKIE_MAX_AGE,
+      /* Only sent over HTTPS in production; omitted on http://localhost so
+         local dev keeps working. */
+      secure: process.env.NODE_ENV === "production",
     });
   } catch {
     // Server components can read an existing guest; cookie writes happen on mutations.

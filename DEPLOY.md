@@ -103,6 +103,48 @@ An unrecognized or missing cookie mints a **new** guest instead of erroring, so
 a wrong cookie name looks like the limit silently not working. Check that the
 `guestId` in the response matches the cookie you sent.
 
+### If the app is down
+
+Check in this order — it is usually not the app.
+
+**1. Is it the trial?** The single most likely cause on a new Fly account. The
+free trial caps machine runtime at **5 minutes**, and the log says so outright:
+
+```
+✓ Ready in 392ms                              ← app is fine
+machine became reachable in 3.55s             ← serving normally
+warn  Trial machine stopping. To run for
+      longer than 5m0s, add a credit card
+      by visiting https://fly.io/trial.
+reboot: Restarting system
+```
+
+Because `min_machines_running = 1`, Fly restarts the machine, it serves for
+5 minutes, and dies again — a boot/serve/die loop, then it gives up. Every
+`flyctl` command fails with `trial has ended, please add a credit card`. The fix
+is adding a card at <https://fly.io/trial>; nothing in this repo can work around
+it.
+
+**2. Is Fly itself degraded?** Check the platform status before debugging code:
+
+```sh
+curl -s https://status.flyio.net/api/v2/status.json
+# {"status":{"indicator":"major","description":"Partial System Outage"}}
+```
+
+**3. Is the machine even running?** `flyctl status` / `machine list` are the
+authoritative answer, but note they are *also* the first thing the trial
+restriction blocks.
+
+Note the failure signature: when the machine is stopped, the edge proxy still
+answers TCP on 443 (DNS resolves, `Test-NetConnection` succeeds) but returns
+**HTTP 000 / connection closed** rather than 502 — there is no backend to route
+to. A 502 is different: that means the machine *is* up but nothing is listening
+on `internal_port` (see the trap above).
+
+Volume data survives a stopped machine — `clickpoint_data` is a separate
+resource and is not deleted when the trial lapses.
+
 ## Railway
 
 Connect the GitHub repo, then:

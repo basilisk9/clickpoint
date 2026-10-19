@@ -51,3 +51,7 @@ dev-server.log
 _dev.log
 npm-install.log
 npm-install.err
+
+# build / typecheck output
+*.log
+*.err

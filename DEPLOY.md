@@ -1,27 +1,64 @@
 # Deploying Clickpoint
 
-The app is a long-lived Node server, not a serverless function. `pipeline.ts`
-uses fire-and-forget `void generateRemaining(...)` to build later cards while
-the user reads card 1. That work dies the moment a serverless response returns,
-so this needs a container host (Fly.io, Railway, Render) rather than
-Vercel/Netlify. Vercel's `waitUntil`/`after()` can extend an invocation, but only
-up to the route's `maxDuration` (300s on Hobby) — a pathway takes ~2.5 min today
-and would fail silently if it ever overran that ceiling. Once `store.ts` talks
-to a real database instead of the local filesystem, Vercel becomes viable.
+Records live in Postgres (Supabase), so the app needs **no persistent disk** and
+runs on any free host — including serverless ones.
+
+`pipeline.ts` builds later cards in the background after the response is sent.
+That work dies the moment a serverless response returns, so it is wrapped in
+`after()` from `next/server`, which keeps the invocation alive until the work
+settles. The ceiling is the route's `maxDuration` — **300s on Vercel Hobby, and
+Hobby cannot raise it**. A pathway takes ~2.5 min today, so there is roughly 2x
+headroom and not much more.
+
+The background job is claimed via a `filling` flag on the `pathways` row
+(`claimFilling`), not an in-process `Set`. Every serverless invocation is a new
+process, so an in-memory guard can never dedupe across them.
 
 ## What the app needs
 
 | Variable | Purpose |
 | --- | --- |
 | `LOGFARE_API_KEY` | Hack Club AI key (`sk-hc-v1-...`). **Secret.** |
-| `DATA_DIR` | Writable dir for guest + pathway JSON. Must be a mounted volume. |
+| `DATABASE_URL` | Postgres connection string. Must be Supabase's **pooler** (port 6543). |
 | `LOGFARE_BASE_URL` | Defaults to the Hack Club proxy. |
 | `LOGFARE_MODEL` | Defaults to `deepseek/deepseek-v4.1-flash`. |
 
-`DATA_DIR` is the whole ballgame. Unset, records go to the container's
-ephemeral disk and **every user's progress is wiped on the next deploy**.
+`DATABASE_URL` must be the **pooler** connection string, not the direct one.
+Each serverless invocation opens its own connection, so the direct port (5432)
+runs out of slots almost immediately and requests fail with connection errors
+under trivial load.
 
-## Fly.io — current deployment
+Run `db/schema.sql` once against the database to create `guests` and `pathways`.
+
+## Supabase + Vercel — the free path
+
+**$0/month.** No persistent disk, no spin-down restarts.
+
+1. **Create the database.** Supabase project → SQL editor → paste `db/schema.sql`
+   → run.
+2. **Copy the pooler string.** Project → Connect → *Connection pooling* →
+   *Transaction* mode:
+   `postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:6543/postgres`
+   Do **not** use the direct `db.<ref>.supabase.co:5432` string.
+3. **Import the repo into Vercel.** Framework is auto-detected as Next.js.
+4. **Set env vars** (Settings → Environment Variables): `DATABASE_URL`,
+   `LOGFARE_API_KEY`, optionally `LOGFARE_MODEL`.
+5. **Deploy**, then verify (below).
+
+### Vercel gotchas
+
+- **300s is a hard `maxDuration` ceiling on Hobby.** Pro allows 800s. The
+  generating routes already declare `export const maxDuration = 300`.
+- **`after()` shares that budget with the synchronous part of the request.**
+  Anything added to the POST path eats into the same 300s.
+- **Vercel Hobby is non-commercial use only** per Vercel's terms.
+- **Free Supabase projects pause after 1 week of inactivity.** The database
+  sleeps and every request fails until you resume it from the dashboard. Keep it
+  warm with a free external cron (e.g. cron-job.org) hitting the site weekly.
+- **Do not use Render's free Postgres** — it is deleted 30 days after creation.
+  Supabase is the database; Render would only ever be the app host.
+
+## Fly.io — previous deployment (currently offline)
 
 Deployed and verified at **https://clickpoint.fly.dev** (app `clickpoint`, region
 `ams`, volume `clickpoint_data`).
@@ -145,13 +182,14 @@ on `internal_port` (see the trap above).
 Volume data survives a stopped machine — `clickpoint_data` is a separate
 resource and is not deleted when the trial lapses.
 
-## Railway
+## Railway / Render (container hosts)
 
-Connect the GitHub repo, then:
+Connect the GitHub repo — both detect the Dockerfile automatically — then set
+`DATABASE_URL` and `LOGFARE_API_KEY` as environment variables.
 
-1. Add a volume mounted at `/data`.
-2. Set `DATA_DIR=/data` and `LOGFARE_API_KEY` as variables.
-3. Railway detects the Dockerfile automatically.
+No volume is needed any more; records live in Postgres. On a long-lived process
+there is also no `maxDuration` ceiling, so the background fill is safer here than
+on Vercel. `after()` still works under `next start`.
 
 ## After deploying, verify
 
@@ -165,17 +203,30 @@ and confirm a pathway builds. Re-running the same POST within 24h should return
 
 ## Not yet done
 
-- **No accounts.** Identity is a guest cookie, so clearing cookies resets both
-  the library and the daily limit. Real enforcement needs the sign-up work.
-- **No database.** Records are JSON on the volume; `rawNotes` is retained in
-  full for every pathway and is never cleared. With accounts this becomes a
-  privacy claim, so decide retention before shipping sign-up.
-- **`getGuest` swallows every error and returns `null`** (`store.ts`). A
-  truncated or corrupt guest file silently hands that user a brand-new empty
-  library with no error logged anywhere. Narrow the catch to `ENOENT` only.
-- **Single machine only.** File-per-record storage means last-write-wins with no
-  locking, and the background generator is in-process. Running two machines
-  would have them fight over the same volume.
+- **No accounts.** Identity is still a guest cookie, so clearing cookies resets
+  both the library and the daily limit. Supabase Auth is included on the free
+  tier (50k monthly active users) and would replace the planned hand-rolled
+  `users`/`sessions` tables — use `@supabase/ssr`, which handles App Router
+  cookies, and verify identity with `getClaims()` on the server.
+- **`rawNotes` is retained in full** for every pathway and is never cleared.
+  With accounts this becomes a privacy claim, so decide retention before
+  shipping sign-up.
+- **Read-modify-write on the whole `PathwayRecord`.** `savePathway` writes the
+  entire JSON blob, and `fillLesson` re-reads, mutates, and writes. Two
+  concurrent writers — a user finishing a lesson while the background fill runs —
+  can still clobber each other. This was last-write-wins on the filesystem too,
+  and Postgres does not fix it by itself; it needs a per-pathway lock or
+  `select ... for update`.
+- **A generation killed mid-run permanently strands the pathway.** `filling` is
+  a bare boolean with no expiry, and a killed process never reaches the
+  `finally` that would release it. The pathway stays `ready` with its first
+  lesson, the rest keep their placeholder status, and every later attempt to
+  claim returns `false` — so it is never retried and never resumed. This is not
+  specific to `maxDuration`: a deploy, an OOM, or any crash during a run does the
+  same thing. The fix is a lease (`filling_until timestamptz`, claimed with
+  `where filling_until is null or filling_until < now()`) plus skipping lessons
+  whose card and quiz are already populated, so a retry resumes rather than
+  redoing the work.
 - **Browser click-through not done.** The quiz fail path (lose 3 hearts →
   "Out of hearts") and the results screen (XP count-up, question log) have only
   been verified via API and SSR HTML, not a real browser.

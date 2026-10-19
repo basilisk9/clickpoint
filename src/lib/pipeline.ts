@@ -11,8 +11,16 @@ import {
   outlineUser,
   quizUser,
 } from "./prompts";
+import { after } from "next/server";
 import { sanitizeBannerSvg } from "./sanitize";
-import { getGuest, getPathway, saveGuest, savePathway } from "./store";
+import {
+  claimFilling,
+  getGuest,
+  getPathway,
+  releaseFilling,
+  saveGuest,
+  savePathway,
+} from "./store";
 import type {
   CardAccent,
   CardExample,
@@ -29,8 +37,6 @@ import type {
   QuizPayload,
   QuizQuestion,
 } from "./types";
-
-const jobs = new Set<string>();
 
 function clampLessons(count: number, available: number) {
   const n = Number.isFinite(count) ? Math.round(count) : available;
@@ -378,12 +384,58 @@ async function fillLesson(pathwayId: string, lessonIndex: number) {
   }
 }
 
+/* A node is resumable when it was supposed to get content, hasn't yet, and
+   wasn't deliberately failed (failed lessons have a manual "regenerate" button,
+   so we don't silently re-run them on every poll). This is exactly the state a
+   killed run leaves behind: card/quiz set to "generating" but with no content. */
+function hasResumableNodes(pathway: PathwayRecord): boolean {
+  return pathway.nodes.some(
+    (node) =>
+      (node.kind === "card" && !node.card && node.status !== "failed") ||
+      (node.kind === "quiz" && !node.quiz && node.status !== "failed"),
+  );
+}
+
+/* Fill every lesson that isn't already done, in order. Re-reads before each
+   iteration because fillLesson mutates its own copy, not the caller's. Starting
+   at 0 (not 1) means this also recovers a run that died during the first
+   lesson; already-complete lessons are skipped, so a resume never re-burns LLM
+   calls for work that already succeeded. */
 async function generateRemaining(pathwayId: string) {
-  const pathway = await getPathway(pathwayId);
+  let pathway = await getPathway(pathwayId);
   if (!pathway) return;
-  for (let i = 1; i < pathway.outline.lessons.length; i += 1) {
+  for (let i = 0; i < pathway.outline.lessons.length; i += 1) {
+    const card = pathway.nodes.find(
+      (node) => node.kind === "card" && node.lessonIndex === i,
+    );
+    const quiz = pathway.nodes.find(
+      (node) => node.kind === "quiz" && node.lessonIndex === i,
+    );
+    if (card?.card && quiz?.quiz) continue;
     await fillLesson(pathwayId, i);
+    pathway = (await getPathway(pathwayId)) ?? pathway;
   }
+}
+
+/* Self-heal: if this pathway has unfinished (non-failed) nodes and no live fill
+   holds the lease, take the lease and resume in the background. Called from the
+   pathway GET route, which PathwayView polls every few seconds — so a run killed
+   mid-generation is picked up automatically once its lease expires, with no cron
+   and no manual step. No-op while a run is alive (the lease is held) or when
+   there's nothing left to fill. */
+export async function maybeResumeGeneration(
+  pathway: PathwayRecord,
+): Promise<void> {
+  if (pathway.status === "failed") return;
+  if (!hasResumableNodes(pathway)) return;
+  if (!(await claimFilling(pathway.id))) return;
+  after(async () => {
+    try {
+      await generateRemaining(pathway.id);
+    } finally {
+      await releaseFilling(pathway.id);
+    }
+  });
 }
 
 export async function createPathwayFromNotes(guest: GuestRecord, rawNotes: string) {
@@ -441,9 +493,19 @@ export async function createPathwayFromNotes(guest: GuestRecord, rawNotes: strin
   ready.status = "ready";
   await savePathway(ready);
 
-  if (!jobs.has(ready.id)) {
-    jobs.add(ready.id);
-    void generateRemaining(ready.id).finally(() => jobs.delete(ready.id));
+  /* Vercel tears the function down the moment the response is returned, so a
+     bare `void generateRemaining(...)` would be cut off mid-run. `after()`
+     keeps the invocation alive until the work settles, bounded by the route's
+     maxDuration (300s on Hobby). The DB claim replaces the old in-process
+     `jobs` Set, which can't dedupe across serverless invocations. */
+  if (await claimFilling(ready.id)) {
+    after(async () => {
+      try {
+        await generateRemaining(ready.id);
+      } finally {
+        await releaseFilling(ready.id);
+      }
+    });
   }
 
   return ready;

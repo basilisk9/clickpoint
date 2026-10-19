@@ -1,6 +1,7 @@
 # Clickpoint — production image.
-# Long-lived Node server (not serverless): background pathway generation in
-# pipeline.ts uses fire-and-forget work that must outlive the HTTP response.
+# Records live in Postgres (DATABASE_URL), so the container needs no volume.
+# Background pathway generation runs through after() in pipeline.ts, which
+# keeps the process alive past the HTTP response.
 
 FROM node:24-alpine AS deps
 WORKDIR /app
@@ -27,12 +28,6 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
-
-# The volume mounts here; created up front so the path exists and is writable
-# even before a volume is attached.
-RUN mkdir -p /data && chown -R nextjs:nodejs /data
-ENV DATA_DIR=/data
-VOLUME ["/data"]
 
 USER nextjs
 EXPOSE 3000

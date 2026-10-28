@@ -1,5 +1,5 @@
 const DEFAULT_BASE = "https://ai.hackclub.com/proxy/v1";
-const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
+const DEFAULT_MODEL = "z-ai/glm-5.3-flash";
 const DEFAULT_FALLBACK_MODELS = "";
 
 // Retryable calls loop forever until one succeeds (see chat/chatJson): a
@@ -68,6 +68,11 @@ type ModelConfig = {
   // and 298 with it off. Opt in per deployment, because the flag is a
   // chat-template hint that not every provider accepts.
   disableThinking: boolean;
+  // OpenRouter-style `reasoning` object, for models whose thinking is
+  // mandatory and can only be throttled to an effort level (GLM 5.3 Flash:
+  // low | high | max). Sent only when LOGFARE_REASONING_EFFORT is set, since
+  // a model that needs it also needs the field omitted entirely otherwise.
+  reasoningEffort: string;
 };
 
 type CallResult =
@@ -110,6 +115,7 @@ function getConfig(): ModelConfig {
     model,
     fallbacks: parseFallbacks(model),
     disableThinking: process.env.LOGFARE_DISABLE_THINKING === "true",
+    reasoningEffort: (process.env.LOGFARE_REASONING_EFFORT || "").trim(),
   };
 }
 
@@ -319,6 +325,13 @@ async function performRequest(
   const variants: Array<Record<string, unknown>> = config.disableThinking
     ? [{ chat_template_kwargs: { enable_thinking: false } }, {}]
     : [{}];
+  // Effort is capped per deployment, but a provider that rejects the field
+  // must still be served, so it is dropped on a 400 like the hint above.
+  if (config.reasoningEffort) {
+    variants.forEach((variant) => {
+      variant.reasoning = { effort: config.reasoningEffort };
+    });
+  }
 
   let rejection = "";
 

@@ -4,6 +4,10 @@ import { useState, type ReactNode } from "react";
 import type { CardLevel } from "@/lib/types";
 
 const TONES: Record<CardLevel, { chip: string; bar: string }> = {
+  breeze: {
+    chip: "bg-[color:var(--paper2)] text-[color:var(--ink-soft)] border-[color:var(--ink)]/20",
+    bar: "bg-[color:var(--ink-faint)]",
+  },
   warm: {
     chip: "bg-pine-soft text-pine-deep border-pine/30",
     bar: "bg-pine",
@@ -44,7 +48,6 @@ export function WorkedExample({
   const [shown, setShown] = useState(0);
   const done = shown >= steps.length;
   const tone = TONES[level] ?? TONES.warm;
-
   return (
     <article className="overflow-hidden rounded-xl border-2 border-[color:var(--ink)]/12 bg-[color:var(--card-surface)] shadow-[0_8px_28px_-20px_rgba(19,42,50,0.4)]">
       <div className={`h-1.5 ${tone.bar}`} />

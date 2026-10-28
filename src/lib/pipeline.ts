@@ -1,4 +1,4 @@
-import { FINISH_LESSON_XP, MAX_LESSONS, MIN_LESSONS, QUESTIONS_PER_QUIZ } from "./constants";
+﻿import { FINISH_LESSON_XP, MAX_LESSONS, MIN_LESSONS, QUESTIONS_PER_QUIZ } from "./constants";
 import { chatJson } from "./ai";
 import { createId } from "./ids";
 import {
@@ -12,6 +12,9 @@ import {
   quizUser,
 } from "./prompts";
 import { after } from "next/server";
+/* Card normalization lives in card.ts: the renderer needs the same code, so it
+   stays free of server-only imports. */
+import { normalizeCardSpec } from "./card";
 import { sanitizeBannerSvg } from "./sanitize";
 import {
   claimFilling,
@@ -22,12 +25,7 @@ import {
   savePathway,
 } from "./store";
 import type {
-  CardAccent,
-  CardExample,
-  CardLevel,
-  CardMove,
   CardSpec,
-  CardVisualKind,
   GuestRecord,
   LessonPlan,
   PathwayBanner,
@@ -53,143 +51,11 @@ function asStringList(value: unknown, fallback: string[]) {
   return next.length ? next : fallback;
 }
 
-/* ------------------------------------------------------------------ */
-/* Card normalization                                                  */
-/*                                                                     */
-/* The model returns a CardSpec, but we never trust it blindly: every  */
-/* field is coerced to the right shape and every enum is checked       */
-/* against the allowed set. A malformed field degrades to a sane       */
-/* default instead of breaking the renderer, so a card can never be    */
-/* "half-rendered" the way a broken HTML document could.               */
-/* ------------------------------------------------------------------ */
-
-const ACCENTS: CardAccent[] = ["pine", "blood", "cobalt", "ember", "gold"];
-const VISUAL_KINDS: CardVisualKind[] = ["landscape", "bars", "area", "none"];
-const LEVELS: CardLevel[] = ["warm", "firm", "brutal", "transfer"];
-
-function asEnum<T extends string>(value: unknown, allowed: T[], fallback: T): T {
-  return allowed.includes(value as T) ? (value as T) : fallback;
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-}
-
-function asObjectList(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.map(asObject) : [];
-}
-
-function normalizeMove(raw: Record<string, unknown>, index: number): CardMove {
-  return {
-    name: asString(raw.name, `Move ${index + 1}`),
-    trigger: asString(raw.trigger, "when this pattern appears"),
-    formula: asString(raw.formula, ""),
-    body: asString(raw.body, ""),
-    check: asString(raw.check, ""),
-  };
-}
-
-function normalizeExample(
-  raw: Record<string, unknown>,
-  index: number,
-  fallbackLevel: CardLevel,
-): CardExample {
-  return {
-    level: asEnum(raw.level, LEVELS, fallbackLevel),
-    source: asString(raw.source, `example ${index + 1}`),
-    title: asString(raw.title, `Worked example ${index + 1}`),
-    prompt: asString(raw.prompt, ""),
-    steps: asStringList(raw.steps, []),
-    takeaway: asString(raw.takeaway, ""),
-  };
-}
-
-function normalizeCardSpec(raw: CardSpec, lesson: LessonPlan): CardSpec {
-  const visual = asObject((raw as Record<string, unknown>).visual);
-  const formal = asObject((raw as Record<string, unknown>).formal);
-  const invariant = asObject(formal.invariant);
-  const ledger = asObject(formal.ledger);
-  const trick = asObject(formal.trick);
-  const checks = asObject(formal.checks);
-  const scope = asObject(formal.scope);
-  const ramp = asObject((raw as Record<string, unknown>).ramp);
-  const cta = asObject((raw as Record<string, unknown>).cta);
-  const headingIn = Array.isArray(raw.heading) ? raw.heading.map((h) => asString(h)) : [];
-
-  const movesIn = asObjectList(formal.moves);
-  const moves: CardMove[] = movesIn.slice(0, 4).map(normalizeMove);
-  if (!moves.length) {
-    moves.push(normalizeMove({}, 0));
-  }
-
-  const examplesIn = asObjectList(ramp.examples);
-  const levelOrder: CardLevel[] = ["warm", "firm", "brutal", "transfer"];
-  const examples: CardExample[] = examplesIn
-    .slice(0, 4)
-    .map((item, i) => normalizeExample(item, i, levelOrder[Math.min(i, 3)]));
-
-  const checkItems = asObjectList(checks.items)
-    .slice(0, 4)
-    .map((item) => ({
-      latex: asString(item.latex, ""),
-      note: asString(item.note, ""),
-    }));
-
-  return {
-    title: asString(raw.title, lesson.title),
-    pathSub: asString(raw.pathSub, lesson.subtitle),
-    accent: asEnum(raw.accent, ACCENTS, "pine"),
-    heading: [
-      asString(headingIn[0], lesson.title),
-      asString(headingIn[1], ""),
-    ],
-    lead: asString(raw.lead, lesson.topic),
-    metaNeutral: asStringList(raw.metaNeutral, []).slice(0, 4),
-    metaAccent: asString(raw.metaAccent, "CARD"),
-    visual: {
-      kind: asEnum(visual.kind, VISUAL_KINDS, "none"),
-      heading: asString(visual.heading, ""),
-      intro: asString(visual.intro, ""),
-      chips: asStringList(visual.chips, []).slice(0, 4),
-      caption: asString(visual.caption, ""),
-    },
-    formal: {
-      heading: asString(formal.heading, "The formal part"),
-      invariant: {
-        label: asString(invariant.label, "THE INVARIANT"),
-        headline: asString(invariant.headline, ""),
-      },
-      ledger: {
-        latex: asString(ledger.latex, ""),
-        note: asString(ledger.note, ""),
-      },
-      variablePart: asString(formal.variablePart, ""),
-      moves,
-      trick: {
-        label: asString(trick.label, "THE TRICK"),
-        body: asString(trick.body, ""),
-      },
-      checks: {
-        title: asString(checks.title, "Sanity checks"),
-        items: checkItems,
-        after: asString(checks.after) || undefined,
-      },
-      scope: {
-        title: asString(scope.title, "Where this applies"),
-        body: asString(scope.body, ""),
-      },
-    },
-    ramp: {
-      heading: asString(ramp.heading, "Practice ramp"),
-      intro: asString(ramp.intro, ""),
-      examples,
-    },
-    cta: {
-      heading: asString(cta.heading, "You have the picture."),
-      body: asString(cta.body, ""),
-    },
-  };
-}
+/* How long a regenerate request waits for the background fill to release the
+   pathway lease before giving up. A lesson fill takes 30-60s, so this queues
+   behind one lesson and still answers inside the route's 300s ceiling. */
+const REGENERATE_WAIT_MS = 150_000;
+const REGENERATE_POLL_MS = 2_000;
 
 function normalizeOutline(raw: PathwayOutline, notesLength: number): PathwayOutline {
   const lessonsIn = Array.isArray(raw.lessons) ? raw.lessons : [];
@@ -216,7 +82,7 @@ function normalizeOutline(raw: PathwayOutline, notesLength: number): PathwayOutl
   return {
     lessonCount: lessons.length,
     subject: asString(raw.subject, "Notes"),
-    unitLabel: asString(raw.unitLabel, `UNIT · ${lessons.length} CARDS`),
+    unitLabel: asString(raw.unitLabel, `UNIT Â· ${lessons.length} CARDS`),
     sourceTag: asString(raw.sourceTag, notesLength > 4000 ? "long notes" : "notes"),
     lessons,
   };
@@ -248,7 +114,7 @@ function buildNodes(outline: PathwayOutline): PathwayNode[] {
       kind: "card",
       lessonIndex: index,
       title: lesson.title,
-      subtitle: `card ${String(index + 1).padStart(2, "0")} · ${lesson.subtitle}`,
+      subtitle: `card ${String(index + 1).padStart(2, "0")} Â· ${lesson.subtitle}`,
       status: index === 0 ? "generating" : "locked",
     });
     nodes.push({
@@ -300,15 +166,25 @@ function normalizeQuiz(raw: QuizPayload): QuizPayload {
 // max_tokens is a CAP, not a target: raising it costs nothing when the model
 // stops early, and is the only thing that saves us when a reasoning model
 // spends several thousand hidden tokens before writing any visible output.
-const CARD_MAX_TOKENS = 16000;
+// Raised to 24000 when cards became section-based: a card that carries a
+// figure, a dictionary, a derivation and five examples is genuinely bigger
+// than the old fixed six-region skeleton.
+const CARD_MAX_TOKENS = 24000;
 // 9000 truncated quizzes when the model wrote more than five questions before
 const QUIZ_MAX_TOKENS = 12000;
 
-async function generateCard(rawNotes: string, lesson: LessonPlan): Promise<CardSpec> {
+async function generateCard(
+  rawNotes: string,
+  lesson: LessonPlan,
+  nextTitle?: string,
+): Promise<CardSpec> {
   const raw = await chatJson<CardSpec>(
     [
       { role: "system", content: CARD_SYSTEM },
-      { role: "user", content: cardUser(rawNotes, lesson.topic, lesson.title) },
+      {
+        role: "user",
+        content: cardUser(rawNotes, lesson.topic, lesson.title, nextTitle),
+      },
     ],
     { maxTokens: CARD_MAX_TOKENS, temperature: 0.45 },
   );
@@ -338,7 +214,11 @@ async function fillLesson(pathwayId: string, lessonIndex: number) {
   await savePathway(pathway);
 
   try {
-    const generated = await generateCard(pathway.rawNotes, lesson);
+    const generated = await generateCard(
+      pathway.rawNotes,
+      lesson,
+      pathway.outline.lessons[lessonIndex + 1]?.title,
+    );
     const latest = await getPathway(pathwayId);
     const live = latest ?? pathway;
     const liveCard = live.nodes.find((node) => node.id === card.id) ?? card;
@@ -419,7 +299,7 @@ async function generateRemaining(pathwayId: string) {
 
 /* Self-heal: if this pathway has unfinished (non-failed) nodes and no live fill
    holds the lease, take the lease and resume in the background. Called from the
-   pathway GET route, which PathwayView polls every few seconds — so a run killed
+   pathway GET route, which PathwayView polls every few seconds â€” so a run killed
    mid-generation is picked up automatically once its lease expires, with no cron
    and no manual step. No-op while a run is alive (the lease is held) or when
    there's nothing left to fill. */
@@ -481,7 +361,7 @@ export async function createPathwayFromNotes(guest: GuestRecord, rawNotes: strin
 
   /* Re-read before writing so we append to the freshest record. The route
      stamps lastPathwayAt on the guest before calling us, and another request
-     could have touched it since — writing our stale copy would drop that. */
+     could have touched it since â€” writing our stale copy would drop that. */
   const fresh = (await getGuest(guest.id)) ?? guest;
   fresh.pathwayIds = [pathway.id, ...fresh.pathwayIds.filter((id) => id !== pathway.id)];
   await saveGuest(fresh);
@@ -511,10 +391,34 @@ export async function createPathwayFromNotes(guest: GuestRecord, rawNotes: strin
   return ready;
 }
 
+/* Regenerating a lesson during the background fill used to be a plain
+   read-modify-write into fillLesson: both writers re-read the whole record,
+   so whichever saved last erased the other's card or quiz. It now takes the
+   same lease the background fill takes, and waits for the holder to finish
+   instead of writing underneath it. */
 export async function regenerateNode(pathway: PathwayRecord, nodeId: string) {
   const node = pathway.nodes.find((item) => item.id === nodeId);
   if (!node) throw new Error("Node not found.");
-  await fillLesson(pathway.id, node.lessonIndex);
+
+  let claimed = await claimFilling(pathway.id);
+  let waited = 0;
+  while (!claimed && waited < REGENERATE_WAIT_MS) {
+    await new Promise((resolve) => setTimeout(resolve, REGENERATE_POLL_MS));
+    waited += REGENERATE_POLL_MS;
+    claimed = await claimFilling(pathway.id);
+  }
+  if (!claimed) {
+    throw new Error(
+      "This pathway is still generating. Try again in a minute.",
+    );
+  }
+
+  try {
+    await fillLesson(pathway.id, node.lessonIndex);
+  } finally {
+    await releaseFilling(pathway.id);
+  }
+
   const next = await getPathway(pathway.id);
   if (!next) throw new Error("Pathway vanished.");
   return next;

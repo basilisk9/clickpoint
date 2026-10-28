@@ -130,11 +130,133 @@ export type GuestRecord = {
 /* ------------------------------------------------------------------ */
 
 export type CardAccent = "pine" | "blood" | "cobalt" | "ember" | "gold";
-export type CardLevel = "warm" | "firm" | "brutal" | "transfer";
+export type CardLevel = "breeze" | "warm" | "firm" | "brutal" | "transfer";
 
 /* The model PICKS a visual from this fixed set; it never invents one.
    New visual kinds are added as React components, not as generated code. */
-export type CardVisualKind = "landscape" | "bars" | "area" | "none";
+export type CardVisualKind =
+  | "landscape"
+  | "bars"
+  | "area"
+  | "disk"
+  | "vector"
+  | "plot"
+  | "oscillation"
+  | "none";
+
+/* ------------------------------------------------------------------ */
+/* Sections â€” the card is an ordered list of these, not a template.     */
+/*                                                                     */
+/* A card used to be one fixed skeleton (invariant â†’ ledger â†’ moves â†’  */
+/* trick â†’ checks â†’ ramp), which forced every concept through the same */
+/* six regions. A dictionary-style card needs a table read across; a   */
+/* derivation-heavy card needs a second derivation; neither fits.      */
+/*                                                                     */
+/* So the model now chooses WHICH sections exist and in WHAT ORDER. It */
+/* still cannot choose how anything looks: `kind` selects a renderer,  */
+/* and every pixel inside it belongs to the design system. That keeps  */
+/* the consistency and the "no model-authored markup" property.        */
+/* ------------------------------------------------------------------ */
+
+export type CardSectionBase = {
+  /* Short kicker above the section title, e.g. "THE THIRD DOOR". */
+  eyebrow?: string;
+  title?: string;
+};
+
+export type CardProseSection = CardSectionBase & {
+  kind: "prose";
+  paras: string[]; // richtext paragraphs
+};
+
+/* A table the learner reads ACROSS: each row is one concept (say, a    */
+/* linear quantity) paired with its rotated twin. Some cells are bare  */
+/* LaTeX, some are prose, and one is picked out as the bridge.         */
+export type CardDictionarySection = CardSectionBase & {
+  kind: "dictionary";
+  columns: string[];
+  rows: { cells: string[]; note?: string }[];
+  readAcross?: string; // richtext: how to read the grid
+  bridge?: { col: number; label: string }; // column that is the transfer rule
+  caption?: string; // richtext
+};
+
+export type CardDerivationSection = CardSectionBase & {
+  kind: "derivation";
+  premise?: string; // richtext: what we assume going in
+  steps: {
+    latex?: string;
+    body?: string; // richtext
+    aside?: string; // richtext, the "why this step" remark
+  }[];
+  result?: { latex?: string; body?: string }; // richtext/LaTeX close
+  caption?: string; // richtext
+};
+
+/* Free-form grid: either `columns` + `rows` (a table the learner reads  */
+/* down) or just `rows` (a labelled definition list).                  */
+export type CardTableSection = CardSectionBase & {
+  kind: "table";
+  columns?: string[];
+  rows: { label?: string; cells: string[]; note?: string }[];
+  caption?: string; // richtext
+};
+
+export type CardCalloutSection = CardSectionBase & {
+  kind: "callout";
+  tone?: "trick" | "warn" | "insight";
+  text: string; // richtext, the headline rule
+  detail?: string; // richtext
+};
+
+/* The ramp. One example per level, ordered easiest first. A `source`  */
+/* is expected on every example: it is what stops the model inventing  */
+/* problems that do not exist in the notes.                            */
+export type CardExamplesSection = CardSectionBase & {
+  kind: "examples";
+  intro?: string; // richtext
+  items: CardExample[];
+};
+
+export type CardMovesSection = CardSectionBase & {
+  kind: "moves";
+  intro?: string; // richtext
+  items: CardMove[];
+};
+
+export type CardFigureSection = CardSectionBase & {
+  kind: "figure";
+  visual: CardVisual;
+  intro?: string; // richtext
+  chips?: string[];
+  caption?: string; // richtext
+};
+
+export type CardSection =
+  | CardProseSection
+  | CardDictionarySection
+  | CardDerivationSection
+  | CardTableSection
+  | CardCalloutSection
+  | CardExamplesSection
+  | CardMovesSection
+  | CardFigureSection;
+
+/* A visual is a registered interactive scene plus the wording around it.
+   `none` means the model judged that no figure illuminates this idea. */
+export type CardVisual = {
+  kind: CardVisualKind;
+  /* Optional registered scene id (see scenes.ts). Unknown ids fall back to
+     the scene family of `kind`, so a stale id never breaks a card. */
+  scene?: string;
+  /* Optional seed values for the scene (e.g. { radius: 0.4, omega: 2 }).
+     Scenes clamp whatever they receive, so a wild number cannot break one. */
+  params?: Record<string, number>;
+  heading?: string;
+  intro?: string; // richtext
+  chips?: string[];
+  caption?: string; // richtext
+};
 
 export type CardMove = {
   name: string;
@@ -154,6 +276,8 @@ export type CardExample = {
 };
 
 export type CardSpec = {
+  /* Bumped when the shape changes. 2 = sections-based card. */
+  version?: number;
   title: string;
   pathSub: string;
   accent: CardAccent;
@@ -161,14 +285,20 @@ export type CardSpec = {
   lead: string; // richtext
   metaNeutral: string[];
   metaAccent: string;
-  visual: {
-    kind: CardVisualKind;
-    heading: string;
-    intro: string; // richtext
-    chips: string[];
-    caption: string; // richtext
-  };
-  formal: {
+
+  /* The card. The model picks which sections exist and in what order. */
+  sections: CardSection[];
+
+  cta: { heading: string; body: string };
+
+  /* What the learner should open next, e.g. the next lesson's title. */
+  nextUp?: string;
+
+  /* LEGACY (pre-sections cards). Still present on records generated before
+     version 2, and still rendered by CardRenderer through a read-only
+     adapter, so no old card breaks. New cards never fill these in. */
+  visual?: CardVisual;
+  formal?: {
     heading: string;
     invariant: { label: string; headline: string };
     ledger: { latex: string; note: string };
@@ -182,6 +312,5 @@ export type CardSpec = {
     };
     scope: { title: string; body: string };
   };
-  ramp: { heading: string; intro: string; examples: CardExample[] };
-  cta: { heading: string; body: string };
+  ramp?: { heading: string; intro: string; examples: CardExample[] };
 };

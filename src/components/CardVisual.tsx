@@ -8,7 +8,7 @@
 /* the math, so a figure is always smooth, correct and on-brand.       */
 /* ------------------------------------------------------------------ */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 
@@ -63,8 +63,8 @@ function turningPoints(E: number, lo: number, hi: number) {
   return roots;
 }
 
-function Landscape() {
-  const [E, setE] = useState(150);
+function Landscape({ params }: { params?: Record<string, number> }) {
+  const [E, setE] = useState(clamp(params?.energy ?? 150, 20, 240));
   const [ballX, setBallX] = useState(2.4);
   const [playing, setPlaying] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -374,8 +374,8 @@ function Bars() {
 /* KIND: area — work as the area under a force–position curve.         */
 /* ------------------------------------------------------------------ */
 
-function Area() {
-  const [a, setA] = useState(1.2);
+function Area({ params }: { params?: Record<string, number> }) {
+  const [a, setA] = useState(clamp(params?.limit ?? 1.2, 0.2, 4));
   const W = 560;
   const H = 320;
   const ML = 56;
@@ -459,13 +459,498 @@ function Area() {
     </div>
   );
 }
+/* ------------------------------------------------------------------ */
+/* KIND: disk — a spinning body with a draggable radius.               */
+/* ------------------------------------------------------------------ */
+
+function arcPath(cx: number, cy: number, r: number, a0: number, a1: number) {
+  const x0 = cx + Math.cos(a0) * r;
+  const y0 = cy + Math.sin(a0) * r;
+  const x1 = cx + Math.cos(a1) * r;
+  const y1 = cy + Math.sin(a1) * r;
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  return `M${x0.toFixed(1)} ${y0.toFixed(1)} A${r.toFixed(1)} ${r.toFixed(1)} 0 ${large} 1 ${x1.toFixed(1)} ${y1.toFixed(1)}`;
+}
+
+function headPoints(x: number, y: number, angle: number, size = 10) {
+  const a1 = angle + Math.PI - 0.42;
+  const a2 = angle + Math.PI + 0.42;
+  return `${x.toFixed(1)},${y.toFixed(1)} ${(x + Math.cos(a1) * size).toFixed(1)},${(
+    y +
+    Math.sin(a1) * size
+  ).toFixed(1)} ${(x + Math.cos(a2) * size).toFixed(1)},${(y + Math.sin(a2) * size).toFixed(1)}`;
+}
+
+function RotatingDisk({ params }: { params?: Record<string, number> }) {
+  const [radius, setRadius] = useState(clamp(params?.radius ?? 0.4, 0.05, 1));
+  const [omega, setOmega] = useState(clamp(params?.omega ?? 2, 0.2, 4));
+  const [angle, setAngle] = useState(0);
+  const [spinning, setSpinning] = useState(true);
+
+  useEffect(() => {
+    if (!spinning) return;
+    let raf = 0;
+    let last = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      setAngle((a) => (a + omega * dt) % (Math.PI * 2));
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [spinning, omega]);
+
+  const W = 420;
+  const H = 280;
+  const cx = 190;
+  const cy = 138;
+  const R = 104;
+  const rPx = radius * R;
+  const tipX = cx + Math.cos(angle) * rPx;
+  const tipY = cy + Math.sin(angle) * rPx;
+  const speed = omega * radius;
+  const lap = (2 * Math.PI) / omega;
+  const arcR = Math.min(rPx * 0.6, 58);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[color:var(--card-line)] bg-[color:var(--card-surface)]">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full touch-none select-none">
+        <circle cx={cx} cy={cy} r={R} fill="var(--color-paper)" stroke="var(--color-pine)" strokeOpacity="0.22" strokeWidth="10" />
+        <circle cx={cx} cy={cy} r={R} fill="none" stroke="var(--color-mist-soft)" strokeWidth="1.5" />
+        {[0, 1, 2, 3].map((i) => {
+          const a = angle + (i * Math.PI) / 2;
+          return (
+            <line
+              key={i}
+              x1={cx - Math.cos(a) * R}
+              y1={cy - Math.sin(a) * R}
+              x2={cx + Math.cos(a) * R}
+              y2={cy + Math.sin(a) * R}
+              stroke="var(--color-mist-soft)"
+              strokeWidth="1.5"
+            />
+          );
+        })}
+        <circle cx={cx} cy={cy} r="4" fill="var(--color-ink-soft)" />
+        <path d={arcPath(cx, cy, arcR, angle - 1, angle)} fill="none" stroke="var(--color-ember)" strokeWidth="2" />
+        <line x1={cx} y1={cy} x2={tipX} y2={tipY} stroke="var(--color-pine)" strokeWidth="2.5" />
+        <circle cx={tipX} cy={tipY} r="7" fill="var(--color-pine)" />
+        <text x={cx + arcR * 0.72} y={cy + 16} fontSize="12" fontWeight="700" fill="var(--color-ember)">
+          θ
+        </text>
+        <text x={tipX + (tipX > cx ? 12 : -12)} y={tipY - 12} textAnchor={tipX > cx ? "start" : "end"} fontSize="12" fontWeight="700" fill="var(--color-pine)">
+          v = {speed.toFixed(2)} m/s
+        </text>
+        <text x={W - 16} y={26} textAnchor="end" fontSize="12" fill="var(--color-ink-soft)">
+          r = {radius.toFixed(2)} m
+        </text>
+        <text x={cx} y={H - 14} textAnchor="middle" fontSize="12" fill="var(--color-ink-faint)">
+          one lap = 2π/ω = {lap.toFixed(2)} s
+        </text>
+      </svg>
+      <div className="flex flex-wrap items-center gap-4 border-t border-[color:var(--card-line)] bg-[color:var(--paper)] px-4 py-3">
+        <label className="flex min-w-[170px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          r
+          <input
+            type="range"
+            min={0.05}
+            max={1}
+            step={0.01}
+            value={radius}
+            onChange={(e) => setRadius(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Radius"
+          />
+        </label>
+        <label className="flex min-w-[170px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          ω
+          <input
+            type="range"
+            min={0.2}
+            max={4}
+            step={0.05}
+            value={omega}
+            onChange={(e) => setOmega(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Angular speed"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setSpinning((s) => !s)}
+          className="rounded-md border border-[color:var(--card-line)] bg-[color:var(--card-surface)] px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-wider text-[color:var(--ink-soft)]"
+        >
+          {spinning ? "pause" : "spin"}
+        </button>
+      </div>
+      <p className="border-t border-[color:var(--card-line)] px-4 py-3 text-[13px] text-[color:var(--ink-soft)]">
+        Every point on the body turns through the same angle in the same time, so ω is
+        shared. Slide r outward and watch v = ωr rise in step: the rim covers more ground
+        per turn than the hub.
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* KIND: vector — one arrow you drag, resolved live into components.   */
+/* ------------------------------------------------------------------ */
+
+function VectorComponents({ params }: { params?: Record<string, number> }) {
+  const [angle, setAngle] = useState(clamp(params?.angle ?? 35, 0, 90));
+  const [mag, setMag] = useState(clamp(params?.magnitude ?? 6, 1, 10));
+  const svgRef = useRef<SVGSVGElement>(null);
+
+  const W = 420;
+  const H = 300;
+  const ox = 64;
+  const oy = H - 64;
+  const unit = 24;
+  const rad = (angle * Math.PI) / 180;
+  const dxv = mag * Math.cos(rad) * unit;
+  const dyv = -mag * Math.sin(rad) * unit;
+  const tipX = ox + dxv;
+  const tipY = oy + dyv;
+  const fx = mag * Math.cos(rad);
+  const fy = mag * Math.sin(rad);
+
+  const drag = (e: React.PointerEvent) => {
+    if (e.buttons === 0 || !svgRef.current) return;
+    const box = svgRef.current.getBoundingClientRect();
+    const px = ((e.clientX - box.left) / box.width) * W - ox;
+    const py = ((e.clientY - box.top) / box.height) * H - oy;
+    setMag(clamp(Math.hypot(px, py) / unit, 1, 10));
+    setAngle(clamp((Math.atan2(-py, Math.max(px, 0.001)) * 180) / Math.PI, 0, 90));
+  };
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[color:var(--card-line)] bg-[color:var(--card-surface)]">
+      <svg
+        ref={svgRef}
+        viewBox={`0 0 ${W} ${H}`}
+        className="block w-full cursor-grab touch-none select-none active:cursor-grabbing"
+        onPointerDown={drag}
+        onPointerMove={drag}
+      >
+        <line x1={ox} y1={oy} x2={W - 20} y2={oy} stroke="var(--color-mist-soft)" strokeWidth="1.5" />
+        <line x1={ox} y1={H - 20} x2={ox} y2={24} stroke="var(--color-mist-soft)" strokeWidth="1.5" />
+        <line x1={tipX} y1={tipY} x2={tipX} y2={oy} stroke="var(--color-cobalt)" strokeWidth="1.5" strokeDasharray="5 4" />
+        <line x1={ox} y1={oy} x2={tipX} y2={oy} stroke="var(--color-pine)" strokeWidth="1.5" strokeDasharray="5 4" />
+        <line x1={ox} y1={oy} x2={tipX} y2={tipY} stroke="var(--color-ember)" strokeWidth="3" />
+        <polygon points={headPoints(tipX, tipY, Math.atan2(dyv, dxv))} fill="var(--color-ember)" />
+        <circle cx={tipX} cy={tipY} r="5" fill="var(--color-ember)" />
+        <text x={(ox + tipX) / 2} y={oy + 18} textAnchor="middle" fontSize="12" fontWeight="700" fill="var(--color-pine)">
+          Fx = {fx.toFixed(2)}
+        </text>
+        <text x={tipX + 10} y={(oy + tipY) / 2} fontSize="12" fontWeight="700" fill="var(--color-cobalt)">
+          Fy = {fy.toFixed(2)}
+        </text>
+        <text x={tipX + 8} y={tipY - 10} fontSize="12" fontWeight="700" fill="var(--color-ember)">
+          F = {mag.toFixed(1)}
+        </text>
+        <text x={W - 18} y={oy + 18} textAnchor="end" fontSize="12" fill="var(--color-ink-faint)">
+          drag the arrow
+        </text>
+      </svg>
+      <div className="flex flex-wrap items-center gap-4 border-t border-[color:var(--card-line)] bg-[color:var(--paper)] px-4 py-3">
+        <label className="flex min-w-[170px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          θ
+          <input
+            type="range"
+            min={0}
+            max={90}
+            step={1}
+            value={angle}
+            onChange={(e) => setAngle(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Angle"
+          />
+        </label>
+        <label className="flex min-w-[170px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          F
+          <input
+            type="range"
+            min={1}
+            max={10}
+            step={0.1}
+            value={mag}
+            onChange={(e) => setMag(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Magnitude"
+          />
+        </label>
+        <span className="font-mono text-[12px] font-bold text-[color:var(--ink-soft)]">
+          θ = {angle.toFixed(0)}° · F = {mag.toFixed(1)}
+        </span>
+      </div>
+      <p className="border-t border-[color:var(--card-line)] px-4 py-3 text-[13px] text-[color:var(--ink-soft)]">
+        The arrow is one thing. The dashed legs are what the axes can see of it:
+        Fx = F cos θ and Fy = F sin θ. Nothing was added or lost — the components are
+        the same arrow in a different pair of clothes.
+      </p>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* KIND: plot — a line you tilt, with slope and intercept read live.   */
+/* ------------------------------------------------------------------ */
+
+function LineSlope({ params }: { params?: Record<string, number> }) {
+  const [slope, setSlope] = useState(clamp(params?.slope ?? 1, -3, 3));
+  const [intercept, setIntercept] = useState(clamp(params?.intercept ?? 0, -4, 4));
+  const clipId = useId().replace(/:/g, "");
+
+  const W = 420;
+  const H = 300;
+  const ML = 44;
+  const MR = 16;
+  const MT = 18;
+  const MB = 34;
+  const xMin = -5;
+  const xMax = 5;
+  const yMin = -5;
+  const yMax = 5;
+  const sx = (x: number) => ML + ((x - xMin) / (xMax - xMin)) * (W - ML - MR);
+  const sy = (y: number) => H - MB - ((y - yMin) / (yMax - yMin)) * (H - MB - MT);
+  const yAt = (x: number) => slope * x + intercept;
+
+  const x0 = 1;
+  const x1 = 3;
+  const rise = slope * (x1 - x0);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[color:var(--card-line)] bg-[color:var(--card-surface)]">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full select-none">
+        <defs>
+          <clipPath id={clipId}>
+            <rect x={ML} y={MT} width={W - ML - MR} height={H - MT - MB} />
+          </clipPath>
+        </defs>
+        {[-4, -3, -2, -1, 1, 2, 3, 4].map((x) => (
+          <line key={`vx${x}`} x1={sx(x)} y1={MT} x2={sx(x)} y2={H - MB} stroke="var(--color-deep-line)" strokeOpacity="0.12" />
+        ))}
+        {[-4, -3, -2, -1, 1, 2, 3, 4].map((y) => (
+          <line key={`hy${y}`} x1={ML} y1={sy(y)} x2={W - MR} y2={sy(y)} stroke="var(--color-deep-line)" strokeOpacity="0.12" />
+        ))}
+        <g clipPath={`url(#${clipId})`}>
+          <line x1={sx(xMin)} y1={sy(yAt(xMin))} x2={sx(xMax)} y2={sy(yAt(xMax))} stroke="var(--color-pine)" strokeWidth="3" />
+          <line x1={sx(x0)} y1={sy(yAt(x0))} x2={sx(x1)} y2={sy(yAt(x0))} stroke="var(--color-cobalt)" strokeWidth="2" strokeDasharray="5 4" />
+          <line x1={sx(x1)} y1={sy(yAt(x0))} x2={sx(x1)} y2={sy(yAt(x1))} stroke="var(--color-ember)" strokeWidth="2" strokeDasharray="5 4" />
+        </g>
+        <line x1={ML} y1={sy(0)} x2={W - MR} y2={sy(0)} stroke="var(--color-mist-soft)" strokeWidth="1.5" />
+        <line x1={sx(0)} y1={MT} x2={sx(0)} y2={H - MB} stroke="var(--color-mist-soft)" strokeWidth="1.5" />
+        <circle cx={sx(0)} cy={sy(intercept)} r="5.5" fill="var(--color-ember)" />
+        <text x={sx(0) + 8} y={sy(intercept) - 8} fontSize="12" fontWeight="700" fill="var(--color-ember)">
+          b = {intercept.toFixed(1)}
+        </text>
+        <text x={W - MR} y={sy(0) - 8} textAnchor="end" fontSize="12" fill="var(--color-ink-faint)">
+          x
+        </text>
+        <text x={ML + 6} y={MT + 12} fontSize="12" fill="var(--color-ink-faint)">
+          y
+        </text>
+        <text x={sx((x0 + x1) / 2)} y={sy(yAt(x0)) + (slope >= 0 ? 16 : -8)} textAnchor="middle" fontSize="11" fill="var(--color-cobalt)">
+          run = {x1 - x0}
+        </text>
+        <text x={sx(x1) + 8} y={(sy(yAt(x0)) + sy(yAt(x1))) / 2} fontSize="11" fill="var(--color-ember)">
+          rise = {rise.toFixed(1)}
+        </text>
+      </svg>
+      <div className="flex flex-wrap items-center gap-4 border-t border-[color:var(--card-line)] bg-[color:var(--paper)] px-4 py-3">
+        <label className="flex min-w-[170px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          m
+          <input
+            type="range"
+            min={-3}
+            max={3}
+            step={0.1}
+            value={slope}
+            onChange={(e) => setSlope(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Slope"
+          />
+        </label>
+        <label className="flex min-w-[170px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          b
+          <input
+            type="range"
+            min={-4}
+            max={4}
+            step={0.1}
+            value={intercept}
+            onChange={(e) => setIntercept(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Intercept"
+          />
+        </label>
+        <span className="font-mono text-[12px] font-bold text-[color:var(--ink-soft)]">
+          y = {slope.toFixed(1)}x {intercept >= 0 ? "+" : "−"} {Math.abs(intercept).toFixed(1)}
+        </span>
+      </div>
+      <p className="border-t border-[color:var(--card-line)] px-4 py-3 text-[13px] text-[color:var(--ink-soft)]">
+        Slope is rise over run: move one unit right and the line climbs m units. The
+        intercept is where it crosses x = 0. Change b and the line slides; change m and it
+        tilts — two dials, two different jobs.
+      </p>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/* KIND: oscillation — a live trace you can stretch and slow down.     */
+/* ------------------------------------------------------------------ */
+
+function Oscillation({ params }: { params?: Record<string, number> }) {
+  const [amp, setAmp] = useState(clamp(params?.amplitude ?? 1, 0.2, 1));
+  const [period, setPeriod] = useState(clamp(params?.period ?? 2, 0.5, 4));
+  const [t, setT] = useState(0);
+  const [playing, setPlaying] = useState(true);
+
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    let last = performance.now();
+    const step = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      setT((prev) => (prev + dt) % (2 * period));
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [playing, period]);
+
+  const W = 420;
+  const H = 280;
+  const ML = 46;
+  const MR = 16;
+  const MT = 24;
+  const MB = 38;
+  const span = 2 * period;
+  const sx = (time: number) => ML + (time / span) * (W - ML - MR);
+  const sy = (y: number) => H - MB - ((y + 1.08) / 2.16) * (H - MB - MT);
+  const yAt = (time: number) => amp * Math.sin((2 * Math.PI * time) / period);
+
+  const path = useMemo(() => {
+    let d = "";
+    const n = 220;
+    for (let i = 0; i <= n; i += 1) {
+      const time = (span * i) / n;
+      d += `${i === 0 ? "M" : "L"}${sx(time).toFixed(1)} ${sy(yAt(time)).toFixed(1)}`;
+    }
+    return d;
+  }, [amp, period]);
+
+  const freq = 1 / period;
+  const omega = (2 * Math.PI) / period;
+  const cursorY = yAt(t);
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-[color:var(--card-line)] bg-[color:var(--card-surface)]">
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full select-none">
+        {[-amp, 0, amp].map((y, i) => (
+          <line
+            key={i}
+            x1={ML}
+            y1={sy(y)}
+            x2={W - MR}
+            y2={sy(y)}
+            stroke="var(--color-mist-soft)"
+            strokeWidth={y === 0 ? 1.5 : 1}
+            strokeDasharray={y === 0 ? undefined : "5 4"}
+          />
+        ))}
+        <line x1={ML} y1={MT} x2={ML} y2={H - MB} stroke="var(--color-mist-soft)" strokeWidth="1.5" />
+        <line x1={ML} y1={H - MB} x2={W - MR} y2={H - MB} stroke="var(--color-mist-soft)" strokeWidth="1.5" />
+        <path d={path} fill="none" stroke="var(--color-pine)" strokeWidth="2.5" />
+        <line x1={sx(t)} y1={MT} x2={sx(t)} y2={H - MB} stroke="var(--color-ember)" strokeWidth="1.5" strokeDasharray="4 3" />
+        <circle cx={sx(t)} cy={sy(cursorY)} r="7" fill="var(--color-ember)" />
+        <text x={ML - 8} y={sy(amp) + 4} textAnchor="end" fontSize="11" fill="var(--color-ink-faint)">
+          +A
+        </text>
+        <text x={ML - 8} y={sy(-amp) + 4} textAnchor="end" fontSize="11" fill="var(--color-ink-faint)">
+          −A
+        </text>
+        <text x={W - MR} y={H - MB + 22} textAnchor="end" fontSize="12" fill="var(--color-ink-faint)">
+          time t (s)
+        </text>
+        <text x={sx(period)} y={H - MB + 22} textAnchor="middle" fontSize="11" fontWeight="700" fill="var(--color-cobalt)">
+          T = {period.toFixed(2)} s
+        </text>
+      </svg>
+      <div className="flex flex-wrap items-center gap-4 border-t border-[color:var(--card-line)] bg-[color:var(--paper)] px-4 py-3">
+        <label className="flex min-w-[150px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          A
+          <input
+            type="range"
+            min={0.2}
+            max={1}
+            step={0.01}
+            value={amp}
+            onChange={(e) => setAmp(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Amplitude"
+          />
+        </label>
+        <label className="flex min-w-[150px] flex-1 items-center gap-2 font-mono text-[12px] text-[color:var(--ink-soft)]">
+          T
+          <input
+            type="range"
+            min={0.5}
+            max={4}
+            step={0.05}
+            value={period}
+            onChange={(e) => setPeriod(parseFloat(e.target.value))}
+            className="w-full"
+            aria-label="Period"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={() => setPlaying((p) => !p)}
+          className="rounded-md border border-[color:var(--card-line)] bg-[color:var(--card-surface)] px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-wider text-[color:var(--ink-soft)]"
+        >
+          {playing ? "pause" : "play"}
+        </button>
+      </div>
+      <p className="border-t border-[color:var(--card-line)] px-4 py-3 text-[13px] text-[color:var(--ink-soft)]">
+        f = 1/T = {freq.toFixed(2)} Hz · ω = 2π/T = {omega.toFixed(2)} rad/s. Stretch the
+        amplitude and the trace gets taller while the period — the time between peaks —
+        does not move. That independence is the whole point of simple harmonic motion.
+      </p>
+    </div>
+  );
+}
+
+
+
 
 /* ------------------------------------------------------------------ */
 
-export function CardVisual({ kind }: { kind: string }) {
-  if (kind === "landscape") return <Landscape />;
-  if (kind === "bars") return <Bars />;
-  if (kind === "area") return <Area />;
+/* The one entry point. `scene` is a registered id from scenes.ts and wins over
+   `kind`; a record written before the registry only carries `kind`, which is
+   why both are accepted here. Unknown input draws nothing rather than a broken
+   frame. */
+export function CardVisual({
+  kind,
+  scene,
+  params,
+}: {
+  kind: string;
+  scene?: string;
+  params?: Record<string, number>;
+}) {
+  if (scene === "rotation-disk" || kind === "disk") return <RotatingDisk params={params} />;
+  if (scene === "vector-components" || kind === "vector") return <VectorComponents params={params} />;
+  if (scene === "line-slope" || kind === "plot") return <LineSlope params={params} />;
+  if (scene === "oscillation" || kind === "oscillation") return <Oscillation params={params} />;
+  if (scene === "energy-bars" || kind === "bars") return <Bars />;
+  if (scene === "work-area" || kind === "area") return <Area params={params} />;
+  if (scene === "energy-landscape" || kind === "landscape") return <Landscape params={params} />;
   return null;
 }
 

@@ -1,8 +1,18 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
 import { UploadForm } from "@/components/UploadForm";
+import { getOrCreateGuest } from "@/lib/guest";
+import { PATHWAY_COOLDOWN_MS } from "@/lib/constants";
+import { dailyGate } from "@/lib/progress";
 
-export default function Home() {
+export default async function Home() {
+  /* The landing page already promises "one pathway per day". Until now that
+     rule only lived in the API, so a returning visitor filled the form,
+     waited, and got a 429. Read the same rule here so the form can say it up
+     front. `getOrCreateGuest` is safe on a GET: it only writes a cookie. */
+  const guest = await getOrCreateGuest().catch(() => null);
+  const gate = dailyGate(guest?.lastPathwayAt, PATHWAY_COOLDOWN_MS);
+
   return (
     <div>
       <SiteHeader />
@@ -21,7 +31,7 @@ export default function Home() {
           lesson. The rest writes itself while you work.
         </p>
         <div className="mt-10 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <UploadForm />
+          <UploadForm lockedUntil={gate.locked ? gate.retryAt : null} waitLabel={gate.wait} />
           <aside className="rounded-[28px] border border-[#d5e0db] bg-[#10242c] p-6 text-[#e8eef2]">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#f59e0b]">
               How it works

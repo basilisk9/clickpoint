@@ -13,5 +13,7 @@ export default async function PathwayPage({
   const { id } = await params;
   const pathway = await getPathway(id);
   if (!pathway || pathway.guestId !== guest.id) notFound();
-  return <PathwayView initial={publicPathway(pathway)} />;
+  return (
+    <PathwayView initial={publicPathway(pathway)} lastPathwayAt={guest.lastPathwayAt ?? null} />
+  );
 }

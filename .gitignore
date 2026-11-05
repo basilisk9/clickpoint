@@ -55,3 +55,4 @@ npm-install.err
 # build / typecheck output
 *.log
 *.err
+*-out.txt

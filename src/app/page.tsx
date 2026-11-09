@@ -1,55 +1,140 @@
-import Link from "next/link";
+import { CardSpecimen } from "@/components/CardSpecimen";
+import { CheckpointSpecimen } from "@/components/CheckpointSpecimen";
 import { SiteHeader } from "@/components/SiteHeader";
 import { UploadForm } from "@/components/UploadForm";
+import { getSessionUser } from "@/lib/auth";
+import {
+  CORRECT_ANSWER_XP,
+  FINISH_LESSON_XP,
+  MAX_LESSONS,
+  MIN_LESSONS,
+  PATHWAY_COOLDOWN_MS,
+  QUESTIONS_PER_QUIZ,
+  QUIZ_PASS_THRESHOLD,
+} from "@/lib/constants";
 import { getOrCreateGuest } from "@/lib/guest";
-import { PATHWAY_COOLDOWN_MS } from "@/lib/constants";
 import { dailyGate } from "@/lib/progress";
 
+/* Product facts come from constants.ts rather than being typed by hand, so
+   changing a rule cannot leave this page describing the old one. */
+const HOURS_PER_PATHWAY = Math.round(PATHWAY_COOLDOWN_MS / (60 * 60 * 1000));
+const PASS_PERCENT = Math.round(QUIZ_PASS_THRESHOLD * 100);
+
+const FACTS = [
+  { value: `${MIN_LESSONS}\u2013${MAX_LESSONS}`, label: "lessons per pathway" },
+  { value: `${QUESTIONS_PER_QUIZ}`, label: "questions per checkpoint" },
+  { value: `${PASS_PERCENT}%`, label: "needed to unlock the next card" },
+  { value: `${HOURS_PER_PATHWAY}h`, label: "between new pathways" },
+];
+
 export default async function Home() {
-  /* The landing page already promises "one pathway per day". Until now that
-     rule only lived in the API, so a returning visitor filled the form,
-     waited, and got a 429. Read the same rule here so the form can say it up
-     front. `getOrCreateGuest` is safe on a GET: it only writes a cookie. */
+  /* The daily rule lives in the API, so a returning visitor used to fill the
+     form, wait, and get a 429. Read the same rule here so the form can show
+     its locked state up front. `getOrCreateGuest` is safe on a GET: it only
+     writes a cookie. */
   const guest = await getOrCreateGuest().catch(() => null);
   const gate = dailyGate(guest?.lastPathwayAt, PATHWAY_COOLDOWN_MS);
+  const account = await getSessionUser().catch(() => null);
 
   return (
     <div>
-      <SiteHeader />
-      <main className="shell pb-20 pt-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#0f766e]">
-          notes in · click out
-        </p>
-        <h1 className="mt-4 max-w-3xl text-6xl font-semibold leading-[0.95] tracking-tight">
+      <SiteHeader account={account ? { username: account.username } : null} />
+      <main className="shell pb-24 pt-8">
+        <h1 className="max-w-3xl text-6xl font-semibold leading-[0.95] tracking-tight">
           Dump the unit.
           <br />
           Walk the path.
         </h1>
         <p className="mt-6 max-w-2xl text-xl leading-8 text-[#5d726c]">
-          Clickpoint turns raw notes into a linear pathway: one lesson card,
-          then a checkpoint, then the next card. You wait only for the first
-          lesson. The rest writes itself while you work.
+          Paste your notes. Every card ends in a checkpoint you have to pass.
         </p>
-        <div className="mt-10 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+
+        <div className="mt-8 max-w-3xl">
           <UploadForm lockedUntil={gate.locked ? gate.retryAt : null} waitLabel={gate.wait} />
-          <aside className="rounded-[28px] border border-[#d5e0db] bg-[#10242c] p-6 text-[#e8eef2]">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#f59e0b]">
-              How it works
-            </p>
-            <ol className="mt-5 space-y-4 text-[17px] leading-7">
-              <li>1. Upload a PDF, PPTX, or paste the notes.</li>
-              <li>2. Grok writes the syllabus, banner, and card 1.</li>
-              <li>3. You learn. Later cards generate in the background.</li>
-              <li>4. Every card is followed by an 8-question checkpoint.</li>
-            </ol>
-            <p className="mt-5 text-sm leading-6 text-[#93a7b4]">
-              One pathway per day. Build it, walk it, come back tomorrow.
-            </p>
-            <Link href="/library" className="mt-8 inline-flex text-sm font-bold text-[#7dcea0]">
-              Open your library →
-            </Link>
-          </aside>
         </div>
+
+        {/* ---------------------------------------------------------------- */}
+        {/* What actually comes back. Both specimens below are real output    */}
+        {/* copied from generated pathways, so this section can be checked    */}
+        {/* against the product instead of taken on trust.                    */}
+        {/* ---------------------------------------------------------------- */}
+
+        <section className="mt-20 grid items-start gap-10 lg:grid-cols-[1fr_1.15fr] lg:gap-14">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#0f766e]">
+              One card per idea
+            </p>
+            <h2 className="mt-3 text-4xl font-semibold leading-tight tracking-tight">
+              Written from the notes you gave it.
+            </h2>
+            <p className="mt-4 text-lg leading-8 text-[#5d726c]">
+              Your notes are split into lessons, and each lesson becomes one card. The card states
+              the rule, shows the move that uses it, and works an example from your own material.
+            </p>
+            <dl className="mt-8 space-y-5 border-t border-[#d5e0db] pt-6">
+              <div>
+                <dt className="text-sm font-bold text-[#10231f]">One idea, not a summary.</dt>
+                <dd className="mt-1 text-[15px] leading-7 text-[#5d726c]">
+                  A card states the rule in one sentence, then works examples at rising difficulty.
+                </dd>
+              </div>
+              <div>
+                <dt className="text-sm font-bold text-[#10231f]">Every example cites its source.</dt>
+                <dd className="mt-1 text-[15px] leading-7 text-[#5d726c]">
+                  Examples carry the source they came from, so a step you cannot find in your own
+                  material is a step you can challenge.
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-6 text-sm leading-6 text-[#5d726c]">
+              Both specimens below are real output, trimmed to their text so the page stays short.
+            </p>
+          </div>
+
+          <CardSpecimen />
+        </section>
+
+        <section className="mt-20 grid items-start gap-10 lg:grid-cols-[1.15fr_1fr] lg:gap-14">
+          <div className="lg:order-2">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#0f766e]">
+              Then prove it
+            </p>
+            <h2 className="mt-3 text-4xl font-semibold leading-tight tracking-tight">
+              The next card unlocks only when you pass the checkpoint.
+            </h2>
+            <p className="mt-4 text-lg leading-8 text-[#5d726c]">
+              Each checkpoint asks {QUESTIONS_PER_QUIZ} questions about the card you just read, then
+              shows the explanation for each one. Score {PASS_PERCENT}% and the next card opens.
+            </p>
+            <p className="mt-6 text-sm leading-6 text-[#5d726c]">
+              A correct answer is worth {CORRECT_ANSWER_XP} XP; finishing a card is worth{" "}
+              {FINISH_LESSON_XP} XP. The question shown is a real one, from the same pathway as the
+              card, and it is not marked up: the app never sends the answer key to your browser.
+            </p>
+          </div>
+
+          <div className="lg:order-1">
+            <CheckpointSpecimen />
+          </div>
+        </section>
+
+        {/* Numbers you can check against the app, not adjectives. */}
+        <section className="mt-20 border-t border-[#d5e0db] pt-10">
+          <dl className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+            {FACTS.map((fact) => (
+              <div key={fact.label}>
+                <dt className="text-4xl font-semibold tracking-tight text-[#10231f]">
+                  {fact.value}
+                </dt>
+                <dd className="mt-2 text-sm leading-6 text-[#5d726c]">{fact.label}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-8 max-w-2xl text-sm leading-6 text-[#5d726c]">
+            One new pathway a day, so nothing here is generated from notes you never opened.
+          </p>
+        </section>
+
       </main>
     </div>
   );

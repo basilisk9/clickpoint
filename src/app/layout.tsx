@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "clickpoint.",
-  description: "Upload notes. Get a pathway. Make the click survive.",
+  description: "Turn your notes into a pathway you can finish.",
 };
 
 export default function RootLayout({

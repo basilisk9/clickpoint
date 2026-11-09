@@ -82,7 +82,7 @@ function normalizeOutline(raw: PathwayOutline, notesLength: number): PathwayOutl
   return {
     lessonCount: lessons.length,
     subject: asString(raw.subject, "Notes"),
-    unitLabel: asString(raw.unitLabel, `UNIT Â· ${lessons.length} CARDS`),
+    unitLabel: asString(raw.unitLabel, `UNIT · ${lessons.length} CARDS`),
     sourceTag: asString(raw.sourceTag, notesLength > 4000 ? "long notes" : "notes"),
     lessons,
   };
@@ -114,7 +114,7 @@ function buildNodes(outline: PathwayOutline): PathwayNode[] {
       kind: "card",
       lessonIndex: index,
       title: lesson.title,
-      subtitle: `card ${String(index + 1).padStart(2, "0")} Â· ${lesson.subtitle}`,
+      subtitle: `card ${String(index + 1).padStart(2, "0")} · ${lesson.subtitle}`,
       status: index === 0 ? "generating" : "locked",
     });
     nodes.push({
@@ -299,7 +299,7 @@ async function generateRemaining(pathwayId: string) {
 
 /* Self-heal: if this pathway has unfinished (non-failed) nodes and no live fill
    holds the lease, take the lease and resume in the background. Called from the
-   pathway GET route, which PathwayView polls every few seconds â€” so a run killed
+   pathway GET route, which PathwayView polls every few seconds — so a run killed
    mid-generation is picked up automatically once its lease expires, with no cron
    and no manual step. No-op while a run is alive (the lease is held) or when
    there's nothing left to fill. */
@@ -361,7 +361,7 @@ export async function createPathwayFromNotes(guest: GuestRecord, rawNotes: strin
 
   /* Re-read before writing so we append to the freshest record. The route
      stamps lastPathwayAt on the guest before calling us, and another request
-     could have touched it since â€” writing our stale copy would drop that. */
+     could have touched it since — writing our stale copy would drop that. */
   const fresh = (await getGuest(guest.id)) ?? guest;
   fresh.pathwayIds = [pathway.id, ...fresh.pathwayIds.filter((id) => id !== pathway.id)];
   await saveGuest(fresh);

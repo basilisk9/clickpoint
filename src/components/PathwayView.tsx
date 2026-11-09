@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { SiteHeader } from "@/components/SiteHeader";
+import { SiteHeader, type HeaderAccount } from "@/components/SiteHeader";
 import { PATHWAY_COOLDOWN_MS } from "@/lib/constants";
 import {
   bannerState,
@@ -23,11 +23,15 @@ function nodeHref(pathwayId: string, node: PathwayNode) {
 export function PathwayView({
   initial,
   lastPathwayAt,
+  account = null,
 }: {
   initial: PathwayRecord;
   /* Passed from the server so the day-done copy can count down without
      another request. Absent just leaves the gate open. */
   lastPathwayAt?: string | null;
+  /* Resolved server-side: this is a client component, so it cannot read the
+     session cookie itself. */
+  account?: HeaderAccount;
 }) {
   const [pathway, setPathway] = useState(initial);
   /* One clock for the whole view, ticked locally, so the countdown re-renders
@@ -65,7 +69,12 @@ export function PathwayView({
 
   return (
     <div>
-      <SiteHeader completed={progress.completed} total={progress.total} xp={pathway.xp} />
+      <SiteHeader
+        completed={progress.completed}
+        total={progress.total}
+        xp={pathway.xp}
+        account={account}
+      />
       <main className="shell pb-24">
         <section className="relative overflow-hidden rounded-[32px] bg-[#10242c] px-10 py-10 text-white shadow-[0_24px_60px_rgba(16,36,44,0.28)]">
           <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#f59e0b]">
@@ -112,8 +121,8 @@ export function PathwayView({
           ))}
         </section>
 
-        {/* The one line that makes "the rest writes itself" visible. Without
-            this the background fill is invisible and the promise is unfelt. */}
+        {/* Background progress. Without this line the fact that later cards
+            appear on their own is invisible. */}
         {banner.kind !== "none" ? (
           <div
             role="status"
@@ -196,7 +205,7 @@ export function PathwayView({
                       });
                     }}
                   >
-                    regenerate
+                    Try again
                   </button>
                 ) : null}
               </div>

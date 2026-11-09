@@ -3,11 +3,9 @@ import type { PathwayNode, PathwayRecord } from "./types";
 /* ------------------------------------------------------------------ */
 /* Derived progress.                                                   */
 /*                                                                     */
-/* The landing page makes four promises ("wait only for the first      */
-/* lesson", "the rest writes itself while you work", "one pathway per  */
-/* day"). None of them are visible unless something turns the node     */
-/* list into a status line. This module is that translation, kept pure */
-/* so the wording is unit-testable without a browser or a database.    */
+/* A pathway is a node list; the learner reads a status line instead.  */
+/* This module is that translation, kept pure so the wording is        */
+/* unit-testable without a browser or a database.                      */
 /* ------------------------------------------------------------------ */
 
 export type ProgressSummary = {
@@ -60,7 +58,7 @@ export function summarizeProgress(pathway: PathwayRecord): ProgressSummary {
 }
 
 
-/* "4 of 8 ready · 4 cooking" — the sentence the background fill needs.
+/* "4 of 8 ready · 4 writing" — the sentence the background fill needs.
    Returns null when there is nothing useful to say, so callers can skip the
    element entirely instead of rendering an empty pill.
 
@@ -73,9 +71,9 @@ export function describeBackgroundFill(progress: ProgressSummary): string | null
   if (progress.total === 0) return null;
   if (progress.generating === 0) return null;
 
-  const cooking = progress.generating === 1 ? "1 cooking" : `${progress.generating} cooking`;
+  const writing = progress.generating === 1 ? "1 still writing" : `${progress.generating} still writing`;
   const open = progress.ready + progress.completed;
-  return `${open} of ${progress.total} ready · ${cooking}`;
+  return `${open} of ${progress.total} ready · ${writing}`;
 }
 
 /* Which node the learner should open next. Walks in pathway order and takes
@@ -110,8 +108,8 @@ export function focusNodeId(pathway: PathwayRecord): string | null {
   return nodes[nodes.length - 1]?.id ?? null;
 }
 
-/* A lesson is one card plus its checkpoint, so "cooking" should count cards:
-   that is what the landing page says is being written. */
+/* A lesson is one card plus its checkpoint, so the "still writing" count
+   should count cards: that is what the learner sees being written. */
 export function cardNodes(pathway: PathwayRecord): PathwayNode[] {
   return (pathway.nodes ?? []).filter((node) => node.kind === "card");
 }
@@ -194,14 +192,14 @@ export function formatCountdown(ms: number): string {
    point at tomorrow. */
 export function describeDayDone(gate: DailyGate): string {
   if (gate.locked && gate.wait) {
-    return `Pathway complete. Next one unlocks in ${gate.wait}.`;
+    return `Pathway complete. Next one in ${gate.wait}.`;
   }
   return "Pathway complete. Build the next one tomorrow.";
 }
 
 /* Which single banner the pathway map shows, if any. Ordering matters: a
    finished pathway beats a filling one, because once everything is done the
-   "cooking" counter would misdescribe the real state the learner is in. */
+   "still writing" counter would misdescribe the real state the learner is in. */
 export type PathwayBannerState =
   | { kind: "day-done"; text: string }
   | { kind: "filling"; text: string }
@@ -223,7 +221,7 @@ export function bannerState(
   if (progress.total > 0 && progress.ready + progress.completed === 0) {
     return {
       kind: "generating-first",
-      text: "Writing your first card. This is the only wait.",
+      text: "Writing your first card. This takes a moment.",
     };
   }
 

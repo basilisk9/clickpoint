@@ -307,15 +307,15 @@ export function QuizEngine({
               <Heart key={k} full={false} />
             ))}
           </div>
-          <h2 className="mt-5 text-3xl font-semibold">Out of hearts.</h2>
+          <h2 className="mt-5 text-3xl font-semibold">Not quite yet.</h2>
           <p className="mt-3 text-[15px] leading-relaxed text-[#5d726c]">
-            You got {correctCount} of {i + 1} before the well ran dry. {label} isn&rsquo;t mean
-            &mdash; it&rsquo;s honest. The click needs one more pass through the card.
+            {correctCount} of {i + 1} correct. Read the card once more, then try
+            the checkpoint again.
           </p>
           <div className="mt-6 flex flex-col gap-2.5">
             <a
               href={`/path/${pathway.id}/card/${previousCardId(pathway, node.id) ?? ""}`}
-              className="rounded-2xl bg-pine px-5 py-3 text-base font-bold text-white shadow-[0_4px_0_var(--color-pine-deep)] transition hover:brightness-110"
+              className="btn btn-primary w-full"
             >
               Re-read the card
             </a>
@@ -330,7 +330,7 @@ export function QuizEngine({
                 setVerdict(null);
                 setPhase("ask");
               }}
-              className="rounded-2xl border-2 border-[#d5e0db] px-5 py-3 text-base font-bold text-[#5d726c] transition hover:border-[#5d726c] hover:text-[#10231f]"
+              className="btn btn-quiet w-full"
             >
               Retry checkpoint
             </button>

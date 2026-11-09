@@ -60,7 +60,7 @@ export function UploadForm({
     /* Server already told us this guest is inside the 24h window. Stop here
        rather than spending a round trip on a guaranteed 429. */
     if (locked) {
-      setError("You already built a pathway today. The next one unlocks when the timer runs out.");
+      setError("You already built today's pathway.");
       return;
     }
 
@@ -102,32 +102,26 @@ export function UploadForm({
   const states = stageStates(elapsed);
   const progress = stageProgress(elapsed);
 
-  /* One pathway per day is a product rule, not an error. Showing a greyed-out
-     form plus a timer reads as "come back tomorrow"; showing the form and then
-     a 429 reads as a bug. */
+  /* One pathway per day is a product rule, not an error. Showing the locked
+     state up front reads as "come back tomorrow"; showing the form and then a
+     429 reads as a bug. */
   if (locked) {
     return (
-      <div className="rounded-[28px] border border-[#d5e0db] bg-white/90 p-8 shadow-[0_20px_60px_rgba(16,35,31,0.08)]">
+      <div className="rounded-[28px] border border-[#d5e0db] bg-white/90 p-6 shadow-[0_20px_60px_rgba(16,35,31,0.08)]">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0f766e]">
-          today&apos;s pathway is built
+          next pathway
         </p>
         <h2 className="mt-3 text-3xl font-semibold leading-tight">
-          One pathway per day.
+          Today&apos;s pathway is built.
         </h2>
-        <p className="mt-3 max-w-md text-[16px] leading-7 text-[#5d726c]">
-          You already built today&apos;s. Keep walking it — the cards that were
-          cooking when you left are ready now.
-        </p>
         {waitLabel ? (
-          <p className="mt-5 inline-flex rounded-full bg-[#e4efe9] px-4 py-2 text-sm font-bold text-[#0a5c51]">
-            Next one unlocks in {waitLabel}
+          <p className="mt-4 text-[16px] leading-7 text-[#5d726c]">
+            The next one opens in{" "}
+            <span className="font-bold text-[#10231f]">{waitLabel}</span>.
           </p>
         ) : null}
         <div className="mt-6 flex flex-wrap gap-3">
-          <Link
-            href="/library"
-            className="rounded-full bg-[#10231f] px-5 py-3 text-sm font-bold text-white no-underline"
-          >
+          <Link href="/library" className="btn btn-primary">
             Open your library
           </Link>
         </div>
@@ -166,7 +160,7 @@ export function UploadForm({
         <button
           type="submit"
           disabled={busy}
-          className="rounded-full bg-[#10231f] px-5 py-3 text-sm font-bold tracking-wide text-white disabled:opacity-60"
+          className="btn btn-primary"
         >
           {busy ? "Building your path…" : "Make the pathway"}
         </button>
@@ -217,8 +211,7 @@ export function UploadForm({
             ))}
           </ol>
           <p className="mt-3 text-sm leading-6 text-[#5d726c]">
-            Usually under a minute. This is the only wait — later cards cook
-            while you read.
+            Usually under a minute.
           </p>
         </div>
       ) : null}

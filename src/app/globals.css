@@ -62,24 +62,73 @@ body {
   font-family: var(--font-geist-sans), Georgia, "Times New Roman", serif;
 }
 
-a { color: inherit; }
-button, input, textarea { font: inherit; }
+/* These rules live inside @layer base on purpose. Unlayered CSS outranks
+   every Tailwind utility, so a bare `a { color: inherit }` silently beat
+   `text-white` and rendered dark buttons as dark-on-dark. */
+@layer base {
+  a { color: inherit; }
+  button, input, textarea { font: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: default; }
+}
 
 .shell {
   width: min(1120px, calc(100% - 48px));
   margin: 0 auto;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--line);
-  background: #fff;
-  border-radius: 999px;
-  padding: 8px 12px;
-  font-size: 13px;
-  font-weight: 600;
+/* Components layer, not unlayered, so layout utilities (w-full, mt-6) and
+   future colour overrides still compose with these. */
+@layer components {
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line);
+    background: #fff;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  /* One button system. Every call to action is .btn + a variant, so a
+     foreground/background pair is decided in exactly one place. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 12px 24px;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    text-decoration: none;
+    transition: background-color .16s ease, border-color .16s ease;
+  }
+
+  .btn:disabled { opacity: .6; }
+
+  .btn-primary {
+    background: var(--ink);
+    color: #fff;
+  }
+  .btn-primary:hover:not(:disabled) { background: #1d3d35; }
+
+  .btn-quiet {
+    background: #fff;
+    color: var(--ink);
+    border-color: var(--ink);
+  }
+  .btn-quiet:hover:not(:disabled) { background: #eef3f1; }
+
+  .btn-sm {
+    padding: 9px 17px;
+    font-size: 13px;
+  }
 }
 
 .grid-page { min-height: 100vh; }

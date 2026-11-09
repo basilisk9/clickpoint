@@ -145,10 +145,10 @@ export type CardVisualKind =
   | "none";
 
 /* ------------------------------------------------------------------ */
-/* Sections â€” the card is an ordered list of these, not a template.     */
+/* Sections — the card is an ordered list of these, not a template.     */
 /*                                                                     */
-/* A card used to be one fixed skeleton (invariant â†’ ledger â†’ moves â†’  */
-/* trick â†’ checks â†’ ramp), which forced every concept through the same */
+/* A card used to be one fixed skeleton (invariant → ledger → moves →  */
+/* trick → checks → ramp), which forced every concept through the same */
 /* six regions. A dictionary-style card needs a table read across; a   */
 /* derivation-heavy card needs a second derivation; neither fits.      */
 /*                                                                     */

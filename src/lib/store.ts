@@ -177,3 +177,10 @@ export function publicPathway(pathway: PathwayRecord): PathwayRecord {
     rawNotes: "",
   };
 }
+
+/* Shared accessor for the connection pool. auth.ts needs the same pool — a
+   second one would double the connections each serverless invocation holds,
+   which is exactly what the small `max` above exists to avoid. */
+export function getDbPool(): Pool {
+  return pool();
+}

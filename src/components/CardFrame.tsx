@@ -86,7 +86,7 @@ export function CardFrame({
         <button
           onClick={finish}
           disabled={busy}
-          className="rounded-full bg-[#10231f] px-6 py-3 text-sm font-bold text-white disabled:opacity-60"
+          className="btn btn-primary"
         >
           {busy ? "Saving…" : "Finish lesson"}
         </button>

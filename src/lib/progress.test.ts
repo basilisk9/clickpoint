@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   bannerState,
   dailyGate,
@@ -203,10 +203,10 @@ describe("describeBackgroundFill", () => {
      `generating` from `total` and counted the locked node as ready. */
   it("counts completed nodes as ready and never counts locked ones", () => {
     const summary = summarizeProgress(fourNodePathway());
-    expect(describeBackgroundFill(summary)).toBe("2 of 4 ready · 1 cooking");
+    expect(describeBackgroundFill(summary)).toBe("2 of 4 ready · 1 still writing");
   });
 
-  it("reads correctly when one node is open and one is cooking", () => {
+  it("reads correctly when one node is open and one is still writing", () => {
     const oneCooking = summarizeProgress(
       pathway({
         nodes: [
@@ -215,7 +215,7 @@ describe("describeBackgroundFill", () => {
         ],
       }),
     );
-    expect(describeBackgroundFill(oneCooking)).toBe("1 of 2 ready · 1 cooking");
+    expect(describeBackgroundFill(oneCooking)).toBe("1 of 2 ready · 1 still writing");
   });
 
   it("returns null when nothing is generating, so no empty pill renders", () => {
@@ -243,7 +243,7 @@ describe("describeBackgroundFill", () => {
         ],
       }),
     );
-    expect(describeBackgroundFill(starting)).toBe("0 of 4 ready · 1 cooking");
+    expect(describeBackgroundFill(starting)).toBe("0 of 4 ready · 1 still writing");
   });
 });
 
@@ -492,7 +492,7 @@ describe("bannerState", () => {
     const state = bannerState(fourNodePathway(), openGate);
     expect(state.kind).toBe("filling");
     if (state.kind !== "filling") throw new Error("unreachable");
-    expect(state.text).toBe("2 of 4 ready · 1 cooking");
+    expect(state.text).toBe("2 of 4 ready · 1 still writing");
   });
 
   it("shows the day-done sentence once every node is finished", () => {

@@ -15,7 +15,7 @@ A pathway is a sequence of lesson cards. Each card is immediately followed by a 
 Your job in this call is ONLY the syllabus: how many lessons, what each lesson is about, and the one-sentence compression each card should produce.
 
 Rules:
-- Choose as many lessons as needed for the notes to feel clear and easy. Typical range is ${MIN_LESSONS}â€“${MAX_LESSONS}. Deep notes may go up to ${MAX_LESSONS}. Thin notes should stay near ${MIN_LESSONS}.
+- Choose as many lessons as needed for the notes to feel clear and easy. Typical range is ${MIN_LESSONS}–${MAX_LESSONS}. Deep notes may go up to ${MAX_LESSONS}. Thin notes should stay near ${MIN_LESSONS}.
 - Do not invent topics that are not in the notes.
 - Each lesson should be one clickable idea, not a chapter dump.
 - Prefer compressions: N specific problems collapsing into one method, one picture, or one formula plus a trick.
@@ -26,13 +26,13 @@ Return JSON only:
 {
   "lessonCount": number,
   "subject": "short subject label",
-  "unitLabel": "UNIT 1 Â· whatever meta fits the notes",
-  "sourceTag": "short source chip, e.g. Ch78 Â· 2018â€“2021",
+  "unitLabel": "UNIT 1 · whatever meta fits the notes",
+  "sourceTag": "short source chip, e.g. Ch78 · 2018–2021",
   "lessons": [
     {
       "id": "l1",
       "title": "The Energy Landscape",
-      "subtitle": "F = -dU/dx Â· equilibrium",
+      "subtitle": "F = -dU/dx · equilibrium",
       "topic": "one paragraph the later card writer will treat as the assigned concept",
       "compression": { "from": 12, "to": 1 }
     }
@@ -60,10 +60,10 @@ SVG rules:
 Return JSON only:
 {
   "title": "Work, Energy & Power",
-  "kicker": "UNIT 1 Â· 4 EXAM SETS Â· ALL 24 FRQS COVERED",
+  "kicker": "UNIT 1 · 4 EXAM SETS · ALL 24 FRQS COVERED",
   "blurb": "...",
-  "stats": ["3 cards", "3 checkpoints", "24 questions", "Ch78 Â· 2018-2021"],
-  "floating": ["F = -dU/dx", "W = âˆ«F dx"],
+  "stats": ["3 cards", "3 checkpoints", "24 questions", "Ch78 · 2018-2021"],
+  "floating": ["F = -dU/dx", "W = ∫F dx"],
   "bannerSvg": "<svg viewBox=\\"0 0 420 180\\" xmlns=\\"http://www.w3.org/2000/svg\\">...</svg>",
   "bannerCaption": "the system behind U = ..."
 }${BREVITY}`;
@@ -184,7 +184,7 @@ Allowed types only:
 - "mcq": conceptual discrimination, 3-5 choices, exactly one correctIndex
 - "numeric": the student types a number. Units are displayed by the host and ignored in grading. Put the expected number in "answer". Optional "unit" label. Optional "tolerance" (absolute). Default tolerance is 1% of |answer| or 0.01.
 
-Every question also carries a short "tag" â€” one or two words naming the skill it tests,
+Every question also carries a short "tag" — one or two words naming the skill it tests,
 e.g. "Concept", "Compute", "Insight", "Edge case", "Counterexample", "Transfer".
 The host renders it as a colored pill, so keep it under 14 characters.
 

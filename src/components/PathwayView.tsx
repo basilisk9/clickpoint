@@ -3,11 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { SiteHeader, type HeaderAccount } from "@/components/SiteHeader";
-import { PATHWAY_COOLDOWN_MS } from "@/lib/constants";
 import {
   bannerState,
-  dailyGate,
   focusNodeId,
+  quotaGate,
   summarizeProgress,
 } from "@/lib/progress";
 import type { PathwayNode, PathwayRecord } from "@/lib/types";
@@ -22,13 +21,14 @@ function nodeHref(pathwayId: string, node: PathwayNode) {
 
 export function PathwayView({
   initial,
-  lastPathwayAt,
+  starts = [],
   account = null,
 }: {
   initial: PathwayRecord;
-  /* Passed from the server so the day-done copy can count down without
-     another request. Absent just leaves the gate open. */
-  lastPathwayAt?: string | null;
+  /* Start timestamps for the quota window, passed from the server so the
+     day-done copy can count down without another request. Empty leaves the
+     gate open. */
+  starts?: string[];
   /* Resolved server-side: this is a client component, so it cannot read the
      session cookie itself. */
   account?: HeaderAccount;
@@ -62,7 +62,7 @@ export function PathwayView({
   }, []);
 
   const progress = summarizeProgress(pathway);
-  const gate = dailyGate(lastPathwayAt, PATHWAY_COOLDOWN_MS, now);
+  const gate = quotaGate(starts, now);
   const banner = bannerState(pathway, gate);
   const focus = focusNodeId(pathway);
   const floaters = useMemo(() => pathway.banner.floating.slice(0, 4), [pathway.banner.floating]);

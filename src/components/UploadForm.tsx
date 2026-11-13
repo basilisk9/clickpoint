@@ -1,80 +1,92 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { MAX_UPLOAD_FILES, PATHWAYS_PER_DAY } from "@/lib/constants";
 import { stageProgress, stageStates } from "@/lib/uploadStages";
+
+/* ------------------------------------------------------------------ */
+/* The generator form.                                                 */
+/*                                                                     */
+/* This is the slow interaction — a pathway takes 30-100s — so it lives */
+/* on its own page. The landing page used to carry it, which meant a    */
+/* stranger met a progress bar before finding out what the product is.  */
+/* ------------------------------------------------------------------ */
+
+/* "19h 42m", "6m" — matches formatWait in ratelimit.ts, duplicated because
+   that module must not cross into the client bundle for one string. */
+function waitLabel(until: number, now: number): string {
+  const totalSeconds = Math.max(1, Math.ceil((until - now) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  if (minutes > 0) return `${minutes}m`;
+  return `${seconds}s`;
+}
 
 export function UploadForm({
   lockedUntil = null,
-  waitLabel = null,
+  used = 0,
 }: {
-  /* ISO timestamp of the next allowed build, from the server's daily gate.
-     Non-null means this guest already built a pathway today. */
+  /* ISO timestamp of the next freed quota slot, from the server. Non-null means
+     this guest has spent the whole rolling window. */
   lockedUntil?: string | null;
-  /* "19h 42m" — pre-rendered on the server so the first paint is correct. */
-  waitLabel?: string | null;
+  /* Pathways already built inside the window, for the "2 of 3" line. */
+  used?: number;
 }) {
   const router = useRouter();
   const [notes, setNotes] = useState("");
-  const [fileName, setFileName] = useState("");
+  const [fileNames, setFileNames] = useState<string[]>([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const startedAt = useRef(0);
-  /* The gate can lapse while this page sits open, so re-check it on a timer.
-     The initial value comes from the prop during render, and the effect only
-     ever *unlocks* — so there is no synchronous setState in the effect body. */
-  const [locked, setLocked] = useState(Boolean(lockedUntil));
+  const [startedAt, setStartedAt] = useState(0);
+  /* One clock for both clocks on this page: the stage estimate while a request
+     is in flight, and the countdown on the locked panel. */
+  const [now, setNow] = useState(() => Date.now());
+
+  const until = lockedUntil ? Date.parse(lockedUntil) : NaN;
+  const locked = Number.isFinite(until) && now < until;
 
   useEffect(() => {
-    if (!lockedUntil) return;
-    const until = Date.parse(lockedUntil);
-    if (Number.isNaN(until)) return;
-    /* Already lapsed before we mounted: nothing to schedule. */
-    if (Date.now() >= until) return;
-
-    const timer = window.setInterval(() => {
-      if (Date.now() >= until) {
-        setLocked(false);
-        window.clearInterval(timer);
-      }
-    }, 30_000);
+    if (!busy && !lockedUntil) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
-  }, [lockedUntil]);
+  }, [busy, lockedUntil]);
 
-  /* A frozen button for 30-60s reads as broken. Tick an elapsed clock while
-     the request is in flight so the stage checklist can advance. */
+  /* The stage checklist advances on a 250ms clock; the countdown above does not
+     need that resolution. */
   useEffect(() => {
     if (!busy) return;
     const timer = window.setInterval(() => {
-      setElapsed(Date.now() - startedAt.current);
+      setElapsed(Date.now() - startedAt);
     }, 250);
     return () => window.clearInterval(timer);
-  }, [busy]);
+  }, [busy, startedAt]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
 
-    /* Server already told us this guest is inside the 24h window. Stop here
-       rather than spending a round trip on a guaranteed 429. */
+    /* Server already said this guest is out of quota. Stop here rather than
+       spending a round trip on a guaranteed 429. */
     if (locked) {
-      setError("You already built today's pathway.");
+      setError("You've used today's pathways.");
       return;
     }
 
-    /* Client-side guard mirrors the API's own validation. Sending an empty
-       form costs a round trip and a 24h rate-limit stamp, which is the worst
-       possible outcome: the user loses today's pathway to a typo. */
-    if (!notes.trim() && !fileName) {
+    /* A client-side guard that mirrors the API. Sending an empty form costs a
+       round trip, and a too-long one costs the user their notes being refused
+       after the wait — checking both here is the cheapest place. */
+    if (!notes.trim() && fileNames.length === 0) {
       setError("Paste your notes or pick a file first.");
       return;
     }
 
     setBusy(true);
     setElapsed(0);
-    startedAt.current = Date.now();
+    setStartedAt(Date.now());
     const form = new FormData(event.currentTarget);
     try {
       const response = await fetch("/api/pathways", {
@@ -102,28 +114,25 @@ export function UploadForm({
   const states = stageStates(elapsed);
   const progress = stageProgress(elapsed);
 
-  /* One pathway per day is a product rule, not an error. Showing the locked
-     state up front reads as "come back tomorrow"; showing the form and then a
-     429 reads as a bug. */
+  /* Out of quota is a product rule, not an error. Showing it up front reads as
+     "come back later"; showing the form and then a 429 reads as a bug. */
   if (locked) {
     return (
       <div className="rounded-[28px] border border-[#d5e0db] bg-white/90 p-6 shadow-[0_20px_60px_rgba(16,35,31,0.08)]">
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0f766e]">
-          next pathway
+          today&apos;s pathways
         </p>
         <h2 className="mt-3 text-3xl font-semibold leading-tight">
-          Today&apos;s pathway is built.
+          That&apos;s {PATHWAYS_PER_DAY} of {PATHWAYS_PER_DAY} built.
         </h2>
-        {waitLabel ? (
-          <p className="mt-4 text-[16px] leading-7 text-[#5d726c]">
-            The next one opens in{" "}
-            <span className="font-bold text-[#10231f]">{waitLabel}</span>.
-          </p>
-        ) : null}
+        <p className="mt-4 text-[16px] leading-7 text-[#5d726c]">
+          The next slot opens in{" "}
+          <span className="font-bold text-[#10231f]">{waitLabel(until, now)}</span>.
+        </p>
         <div className="mt-6 flex flex-wrap gap-3">
-          <Link href="/library" className="btn btn-primary">
+          <a href="/library" className="btn btn-primary">
             Open your library
-          </Link>
+          </a>
         </div>
       </div>
     );
@@ -134,9 +143,12 @@ export function UploadForm({
       onSubmit={onSubmit}
       className="rounded-[28px] border border-[#d5e0db] bg-white/90 p-6 shadow-[0_20px_60px_rgba(16,35,31,0.08)]"
     >
-      <label className="block text-sm font-semibold uppercase tracking-wide text-[#5d726c]">
-        Paste notes
-      </label>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <label className="block text-sm font-semibold uppercase tracking-wide text-[#5d726c]">
+          Paste notes
+        </label>
+        <span className="chip">{PATHWAYS_PER_DAY - used} of {PATHWAYS_PER_DAY} left today</span>
+      </div>
       <textarea
         name="notes"
         value={notes}
@@ -150,21 +162,43 @@ export function UploadForm({
           <input
             type="file"
             name="file"
+            multiple
             accept=".pdf,.pptx,.txt,.md"
             className="hidden"
             disabled={busy}
-            onChange={(event) => setFileName(event.target.files?.[0]?.name || "")}
+            onChange={(event) =>
+              setFileNames(
+                Array.from(event.target.files ?? [])
+                  .slice(0, MAX_UPLOAD_FILES)
+                  .map((file) => file.name),
+              )
+            }
           />
-          {fileName || "Upload PDF / PPTX / TXT"}
+          {fileNames.length === 0
+            ? "Upload PDF / PPTX / TXT (several at once is fine)"
+            : `${fileNames.length} file${fileNames.length === 1 ? "" : "s"}`}
         </label>
-        <button
-          type="submit"
-          disabled={busy}
-          className="btn btn-primary"
-        >
+        <button type="submit" disabled={busy} className="btn btn-primary">
           {busy ? "Building your path…" : "Make the pathway"}
         </button>
       </div>
+
+      {/* One line per file, so it is obvious which ones are being read rather
+          than only how many. */}
+      {fileNames.length ? (
+        <ul className="mt-3 space-y-1">
+          {fileNames.map((name) => (
+            <li key={name} className="truncate font-mono text-xs text-[#5d726c]">
+              {name}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-sm leading-6 text-[#5d726c]">
+          Up to {MAX_UPLOAD_FILES} files — a lecture PDF and a problem set together
+          is the normal case.
+        </p>
+      )}
 
       {busy ? (
         <div className="mt-5 rounded-2xl border border-[#d5e0db] bg-[#f7faf8] p-4">
@@ -201,9 +235,7 @@ export function UploadForm({
                   {state === "done" ? "✓" : state === "active" ? "●" : "○"}
                 </span>
                 <span
-                  className={
-                    state === "pending" ? "text-[#b6c4bf]" : "text-[#10231f]"
-                  }
+                  className={state === "pending" ? "text-[#b6c4bf]" : "text-[#10231f]"}
                 >
                   {stage.label}
                 </span>
@@ -211,7 +243,8 @@ export function UploadForm({
             ))}
           </ol>
           <p className="mt-3 text-sm leading-6 text-[#5d726c]">
-            Usually under a minute.
+            Usually under a minute. Later cards keep writing in the background —
+            you can start reading card 1 as soon as it lands.
           </p>
         </div>
       ) : null}
@@ -220,4 +253,3 @@ export function UploadForm({
     </form>
   );
 }
-

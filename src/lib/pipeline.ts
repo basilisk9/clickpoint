@@ -18,10 +18,9 @@ import { normalizeCardSpec } from "./card";
 import { sanitizeBannerSvg } from "./sanitize";
 import {
   claimFilling,
-  getGuest,
   getPathway,
+  recordPathwayStart,
   releaseFilling,
-  saveGuest,
   savePathway,
 } from "./store";
 import type {
@@ -359,13 +358,12 @@ export async function createPathwayFromNotes(guest: GuestRecord, rawNotes: strin
 
   await savePathway(pathway);
 
-  /* Re-read before writing so we append to the freshest record. The route
-     stamps lastPathwayAt on the guest before calling us, and another request
-     could have touched it since — writing our stale copy would drop that. */
-  const fresh = (await getGuest(guest.id)) ?? guest;
-  fresh.pathwayIds = [pathway.id, ...fresh.pathwayIds.filter((id) => id !== pathway.id)];
-  await saveGuest(fresh);
-  guest.pathwayIds = fresh.pathwayIds;
+  /* Recorded HERE, not by the route, so the stamp and the pathway it counts
+     are written by the same caller. The route used to stamp the guest before
+     calling in, which meant any future caller of this function silently
+     escaped the quota. Appending a row is also atomic where the old
+     read-modify-write of the guest record was not. */
+  await recordPathwayStart(guest.id);
 
   await fillLesson(pathway.id, 0);
   const ready = await getPathway(pathway.id);

@@ -14,7 +14,6 @@ primary_region = 'ams'
 [build]
 
 [env]
-  DATA_DIR = '/data'
   HOSTNAME = '0.0.0.0'
   LOGFARE_BASE_URL = 'https://ai.hackclub.com/proxy/v1'
   LOGFARE_DISABLE_THINKING = 'true'
@@ -23,9 +22,8 @@ primary_region = 'ams'
   LOGFARE_REASONING_EFFORT = 'low'
   PORT = '3000'
 
-[[mounts]]
-  source = 'clickpoint_data'
-  destination = '/data'
+# No [[mounts]] block: records live in Postgres (DATABASE_URL), not on a volume.
+# The old `clickpoint_data` volume is unused by this code and can be deleted.
 
 [http_service]
   internal_port = 3000

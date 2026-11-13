@@ -14,8 +14,22 @@ export const QUESTIONS_PER_QUIZ = 8;
    without making a single slip fatal. */
 export const QUIZ_LIVES = 3;
 
-/* Rate limit: one new pathway per guest per rolling window. Each pathway
+/* Quota: this many new pathways per guest per rolling window. Each pathway
    fires an outline, a banner, and a card + quiz per lesson, so this is the
-   knob that caps LLM spend. */
-export const PATHWAY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+   knob that caps LLM spend. Every headline number on the landing page and in
+   the gate copy is derived from these two, so a rule change cannot leave stale
+   copy behind. */
+export const PATHWAYS_PER_DAY = 3;
+export const QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+/* Ceiling on the notes one pathway may be built from. The notes are re-sent to
+   the model for every card AND every quiz (up to MAX_LESSONS of each), so cost
+   scales with lessons x notes: doubling the notes roughly doubles the input
+   tokens of 20-40 calls. Refusing at the door is cheaper than a half-generated
+   pathway, and the message tells the user exactly what to do about it. */
+export const MAX_NOTES_CHARS = 80_000;
+
+/* One file per upload is not a real limit — a unit's notes are usually a
+   lecture PDF plus a problem set. This is where the form stops, chosen to keep
+   a single request inside the route's 300s budget. */
+export const MAX_UPLOAD_FILES = 6;

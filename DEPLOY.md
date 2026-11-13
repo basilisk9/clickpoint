@@ -21,14 +21,15 @@ process, so an in-memory guard can never dedupe across them.
 | `LOGFARE_API_KEY` | Hack Club AI key (`sk-hc-v1-...`). **Secret.** |
 | `DATABASE_URL` | Postgres connection string. Must be Supabase's **pooler** (port 6543). |
 | `LOGFARE_BASE_URL` | Defaults to the Hack Club proxy. |
-| `LOGFARE_MODEL` | Defaults to `deepseek/deepseek-v4.1-flash`. |
+| `LOGFARE_MODEL` | Defaults to `z-ai/glm-5.3-flash`. |
 
 `DATABASE_URL` must be the **pooler** connection string, not the direct one.
 Each serverless invocation opens its own connection, so the direct port (5432)
 runs out of slots almost immediately and requests fail with connection errors
 under trivial load.
 
-Run `db/schema.sql` once against the database to create `guests` and `pathways`.
+Run `db/schema.sql` once against the database. It is idempotent and creates
+`guests`, `pathways`, `users`, `sessions`, `pathway_starts`, and `feedback`.
 
 ## Supabase + Vercel — the free path
 
@@ -99,12 +100,13 @@ fresh app will need them:
 fly ips allocate-v4 --shared -a clickpoint
 fly ips allocate-v6 -a clickpoint
 
-# The LLM key. Not in the repo; the app cannot generate a pathway without it.
+# The LLM key and the database. Neither is in the repo; the app cannot
+# generate a pathway without them.
 fly secrets set LOGFARE_API_KEY=sk-hc-v1-... -a clickpoint
+fly secrets set DATABASE_URL=postgresql://...pooler...:6543/postgres -a clickpoint
 ```
 
-The dashboard flow *does* create and attach the volume and mount it at `/data`,
-so `DATA_DIR` is handled for you.
+No volume is needed — records live in Postgres.
 
 ### Verifying a deployment
 
@@ -112,28 +114,35 @@ so `DATA_DIR` is handled for you.
 curl -s https://clickpoint.fly.dev/api/pathways
 # {"guestId":"gst_...","pathways":[]}
 
-# Confirm records are landing on the persistent volume, not ephemeral disk:
-fly ssh console -a clickpoint -C 'find /data -type f'
-# /data/guests/gst_....json
+# Confirm records are landing in Postgres, not on disk:
+psql "$DATABASE_URL" -c 'select id, status, created_at from pathways order by created_at desc limit 5'
 ```
 
-Pathway generation takes **~2.5 minutes** (outline + first lesson synchronously,
+Pathway generation takes **~1-3 minutes** (outline + first lesson synchronously,
 remaining cards in the background). A `POST` that seems to hang is normal; check
-`find /data -type f` for a new `pathways/path_*.json` rather than assuming a
-failure.
+the `pathways` table for a new row rather than assuming a failure.
 
-### Rate-limit check
+### Quota check
 
-The guest cookie is named **`clickpoint_guest`** (not `cp_guest`). A second
-`POST` from the same guest within 24h returns:
+The guest cookie is named **`clickpoint_guest`** (not `cp_guest`). Once three
+pathways have been started inside the rolling 24h window, the next `POST`
+returns:
 
 ```sh
 curl -s -w '\nHTTP %{http_code}\n' -X POST https://clickpoint.fly.dev/api/pathways \
   -H 'Content-Type: application/json' \
   -H 'cookie: clickpoint_guest=gst_...' \
   --data-binary '{"notes":"..."}'
-# {"error":"You've already built a pathway today. You can build your next one in 23h 56m.","retryAt":"..."}
+# {"error":"You've built 3 of 3 pathways today. The next one opens in 23h 56m.","retryAt":"..."}
 # HTTP 429
+```
+
+The count comes from the `pathway_starts` table (one row per started pathway,
+appended by `createPathwayFromNotes`), not from a single timestamp — see
+`src/lib/ratelimit.ts`. To reset a guest's quota for testing:
+
+```sql
+delete from pathway_starts where guest_id = 'gst_...';
 ```
 
 An unrecognized or missing cookie mints a **new** guest instead of erroring, so
@@ -179,8 +188,9 @@ answers TCP on 443 (DNS resolves, `Test-NetConnection` succeeds) but returns
 to. A 502 is different: that means the machine *is* up but nothing is listening
 on `internal_port` (see the trap above).
 
-Volume data survives a stopped machine — `clickpoint_data` is a separate
-resource and is not deleted when the trial lapses.
+Volume data from that era survives a stopped machine — `clickpoint_data` is a
+separate resource and is not deleted when the trial lapses — but nothing in this
+code reads it any more.
 
 ## Railway / Render (container hosts)
 
@@ -197,51 +207,62 @@ on Vercel. `after()` still works under `next start`.
 curl -s https://clickpoint.fly.dev/api/pathways
 ```
 
-Expect `{"guestId":"gst_...","pathways":[]}`. Then load the site, paste notes,
-and confirm a pathway builds. Re-running the same POST within 24h should return
-`429` with a countdown — that is the per-guest limit working.
+Expect `{"guestId":"gst_...","pathways":[]}`. Then load the site, paste notes at
+`/new`, and confirm a pathway builds. Starting a fourth pathway inside the
+rolling 24h window should return `429` with a countdown — that is the per-guest
+quota working.
 
-## Not yet done
+## Known limitations
 
-- **No accounts.** Identity is still a guest cookie, so clearing cookies resets
-  both the library and the daily limit. Supabase Auth is included on the free
-  tier (50k monthly active users) and would replace the planned hand-rolled
-  `users`/`sessions` tables — use `@supabase/ssr`, which handles App Router
-  cookies, and verify identity with `getClaims()` on the server.
 - **`rawNotes` is retained in full** for every pathway and is never cleared.
-  With accounts this becomes a privacy claim, so decide retention before
-  shipping sign-up.
-- **Read-modify-write on the whole `PathwayRecord`.** `savePathway` writes the
-  entire JSON blob, and `fillLesson` re-reads, mutates, and writes. Two
-  concurrent writers — a user finishing a lesson while the background fill runs —
-  can still clobber each other. This was last-write-wins on the filesystem too,
-  and Postgres does not fix it by itself; it needs a per-pathway lock or
-  `select ... for update`.
-- **A generation killed mid-run permanently strands the pathway.** `filling` is
-  a bare boolean with no expiry, and a killed process never reaches the
-  `finally` that would release it. The pathway stays `ready` with its first
-  lesson, the rest keep their placeholder status, and every later attempt to
-  claim returns `false` — so it is never retried and never resumed. This is not
-  specific to `maxDuration`: a deploy, an OOM, or any crash during a run does the
-  same thing. The fix is a lease (`filling_until timestamptz`, claimed with
-  `where filling_until is null or filling_until < now()`) plus skipping lessons
-  whose card and quiz are already populated, so a retry resumes rather than
-  redoing the work.
-- **Browser click-through not done.** The quiz fail path (lose 3 hearts →
-  "Out of hearts") and the results screen (XP count-up, question log) have only
-  been verified via API and SSR HTML, not a real browser.
+  Decide retention before making privacy promises.
+- **Read-modify-write on the whole `PathwayRecord` in the progression routes.**
+  `/complete` and `/quiz` do `getPathway` → mutate → `savePathway` on the entire
+  JSON blob without taking the fill lease, so a save that lands while a
+  background fill is writing can drop the other's change. The generation paths
+  are protected by `filling_until`; progression is not. A per-pathway lock or
+  `select ... for update` would close it.
+- **Every report lands in the `feedback` table and nothing reads it in the app.**
+  That is deliberate (see README), but "someone must look at the table" is a
+  manual habit, not a guarantee.
+- **A `node.html` record renders in a sandboxed `<iframe>` with both
+  `allow-scripts` and `allow-same-origin`**, which together negate the sandbox.
+  Only pre-typed-content records carry `html`, so it is legacy-only risk — but
+  the pair should not both be there.
 
-## Verified working (2026-10-15)
+## Verified working (2026-11-13, local + Supabase)
 
-Deployed to Fly and confirmed live, end to end:
+- `npx next build` clean; `tsc --noEmit` clean; `vitest run` 92 tests green.
+- Quota from `pathway_starts` rows: three starts → `429` with
+  `"You've built 3 of 3 pathways today... next one opens in 23h 57m."`, and
+  `/new` renders the locked panel with the same countdown. Deleting one start
+  row flips `/new` back to the form with "1 of 3 left today" — the boundary is
+  per row, not per clock day.
+- Multi-file upload: two `.txt` files plus pasted notes produced one pathway
+  whose `rawNotes` contains the pasted text first, then both files in order, and
+  exactly one `pathway_starts` row was appended.
+- Feedback over HTTP: a first report → `{ok:true,duplicate:false}`; the same
+  stamp retried → `{ok:true,duplicate:true}` with still one row; a different
+  report inside the throttle window → `429`.
+- Browser click-through of the checkpoint to the results screen (choices,
+  check, continue ×8, XP counter, question log), and both feedback surfaces
+  driven through the real UI: card report saved with `node_id`, checkpoint
+  report saved with `node_id`.
+- Note the ordering fix this found: the throttle used to be checked before the
+  duplicate check, so retrying a report that had already been stored returned
+  `429` — an error for a report that was in fact saved. The duplicate check now
+  runs first.
+
+### Historical (2026-10-15, Fly)
+
+Byte-for-byte still true for that deployment, but it predates the Postgres
+migration and the accounts work, so the filesystem and volume details below no
+longer describe this code:
 
 - Image builds remotely — `npm ci` + `next build` + export, 181 MB.
-- `GET /` → 200; `GET /api/pathways` → `{"guestId":"gst_...","pathways":[]}`.
-- A real pathway generated from pasted notes: `status: "ready"` in ~2.5 min.
-- Records persist to the mounted volume (`/data/guests/*.json`,
-  `/data/pathways/*.json`) and survive machine restart.
-- Rate limit: second POST from the same guest → `429` with a 23h 56m countdown.
-- `lastPathwayAt` is stamped ~17s **before** the pathway's `createdAt`,
-  confirming the "stamp before generation" ordering — a run that fails partway
-  still counts against the limit.
+- Records then persisted to a mounted volume (`/data/guests/*.json`,
+  `/data/pathways/*.json`) and survived machine restart. Superseded: records live
+  in Postgres now, so this repo carries no `DATA_DIR` and no `[[mounts]]`
+  block — `store.ts` opens a `DATABASE_URL` pool. If you still have the old
+  `clickpoint_data` volume on Fly, delete it; nothing reads it.
 

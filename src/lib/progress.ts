@@ -1,3 +1,5 @@
+import { PATHWAYS_PER_DAY } from "./constants";
+import { formatWait, quotaFrom } from "./ratelimit";
 import type { PathwayNode, PathwayRecord } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -139,62 +141,51 @@ export function firstOpenCard(pathway: PathwayRecord): PathwayNode | null {
 }
 
 /* ------------------------------------------------------------------ */
-/* The daily gate.                                                     */
+/* The pathway quota, as the UI sees it.                               */
 /*                                                                     */
-/* "One pathway per day" is enforced server-side by ratelimit.ts, but  */
-/* the frontend never said so. This is the client-side read of the     */
-/* same rule, written so a missing or garbage timestamp leaves the     */
-/* user unlocked — matching checkPathwayLimit.                         */
+/* The rule itself lives in ratelimit.ts — pure, no database, no        */
+/* Next import — so this is a read of the SAME counting code the API    */
+/* enforces, not a second implementation of it. Previously the two      */
+/* were separate implementations pinned together by a test; now there   */
+/* is one rule and the test only has to check the wiring.               */
 /* ------------------------------------------------------------------ */
 
-export type DailyGate = {
+export type QuotaGate = {
   locked: boolean;
-  /* ISO timestamp of the next allowed build. */
+  /* Pathways already built inside the rolling window. */
+  used: number;
+  /* Slots left in the window. */
+  remaining: number;
+  /* ISO timestamp of the next freed slot, or null when unlocked. */
   retryAt: string | null;
   /* "19h 42m", or null when unlocked. */
   wait: string | null;
 };
 
-export function dailyGate(
-  lastPathwayAt: string | null | undefined,
-  cooldownMs: number,
+export function quotaGate(
+  starts: readonly string[] | null | undefined,
   now: number = Date.now(),
-): DailyGate {
-  const last = lastPathwayAt ? Date.parse(lastPathwayAt) : NaN;
-  if (Number.isNaN(last)) return { locked: false, retryAt: null, wait: null };
-
-  const elapsed = now - last;
-  if (elapsed >= cooldownMs) return { locked: false, retryAt: null, wait: null };
-
-  const remaining = cooldownMs - elapsed;
+): QuotaGate {
+  const state = quotaFrom(starts, now);
+  const locked = state.remaining === 0;
   return {
-    locked: true,
-    retryAt: new Date(last + cooldownMs).toISOString(),
-    wait: formatCountdown(remaining),
+    locked,
+    used: state.used,
+    remaining: state.remaining,
+    retryAt: locked ? state.nextAt : null,
+    wait: locked && state.nextAt ? formatWait(Date.parse(state.nextAt) - now) : null,
   };
 }
 
-/* "19h 42m", "42m", "30s" — same shape as ratelimit.formatWait, duplicated
-   deliberately: that module imports the guest record shape and must stay out
-   of the client bundle. */
-export function formatCountdown(ms: number): string {
-  const totalSeconds = Math.max(1, Math.ceil(ms / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${seconds}s`;
-}
-
-/* The wording a finished pathway shows. Deliberately not "you're done
-   forever" — the product is one pathway per day, so the sentence has to
-   point at tomorrow. */
-export function describeDayDone(gate: DailyGate): string {
+/* The wording a finished pathway shows. It never reads "one pathway per day",
+   because that is no longer the rule: three may be built, in any order, and
+   the sentence has to say which of them this was. */
+export function describeQuota(gate: QuotaGate): string {
   if (gate.locked && gate.wait) {
-    return `Pathway complete. Next one in ${gate.wait}.`;
+    return `Pathway complete. That's all ${PATHWAYS_PER_DAY} for today — next one in ${gate.wait}.`;
   }
-  return "Pathway complete. Build the next one tomorrow.";
+  const left = gate.remaining === 1 ? "1 more pathway" : `${gate.remaining} more pathways`;
+  return `Pathway complete. ${left} today.`;
 }
 
 /* Which single banner the pathway map shows, if any. Ordering matters: a
@@ -208,12 +199,12 @@ export type PathwayBannerState =
 
 export function bannerState(
   pathway: PathwayRecord,
-  gate: DailyGate,
+  gate: QuotaGate,
 ): PathwayBannerState {
   const progress = summarizeProgress(pathway);
 
   if (progress.finished) {
-    return { kind: "day-done", text: describeDayDone(gate) };
+    return { kind: "day-done", text: describeQuota(gate) };
   }
 
   /* Nothing readable yet: still waiting on card 1. This is the one wait the

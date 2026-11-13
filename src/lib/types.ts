@@ -110,9 +110,30 @@ export type GuestRecord = {
   id: string;
   createdAt: string;
   pathwayIds: string[];
-  /* Rolling 24h rate limit: when this guest last *started* a generation.
-     Optional so pre-existing records without it still parse. */
-  lastPathwayAt?: string;
+  /* The quota is NOT here. It is one row per start in the pathway_starts
+     table, because "N per rolling window" is a count, not a timestamp — and
+     because appending rows cannot race the way a read-modify-write of this
+     record can. listPathwayStarts() is the read side. */
+};
+
+/* ------------------------------------------------------------------ */
+/* Feedback                                                            */
+/*                                                                     */
+/* What a learner can say is wrong. `kind` narrows the report so the    */
+/* useful ones ("the quiz answer is wrong") can be told apart from the  */
+/* general ones without reading every body.                             */
+/* ------------------------------------------------------------------ */
+
+export type FeedbackKind = "bug" | "card" | "quiz" | "idea" | "general";
+
+export type FeedbackInput = {
+  kind: FeedbackKind;
+  body: string;
+  /* Set when the report is anchored to a node, which is what makes it
+     checkable against the generated content. */
+  pathwayId?: string;
+  nodeId?: string;
+  pageUrl?: string;
 };
 
 /* ------------------------------------------------------------------ */

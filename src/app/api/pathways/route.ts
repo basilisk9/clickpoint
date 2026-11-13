@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { extractNotesFromUpload } from "@/lib/extract";
+import { MAX_NOTES_CHARS, PATHWAYS_PER_DAY } from "@/lib/constants";
+import { extractNotesFromUploads } from "@/lib/extract";
 import { getOrCreateGuest } from "@/lib/guest";
 import { createPathwayFromNotes } from "@/lib/pipeline";
-import { checkPathwayLimit } from "@/lib/ratelimit";
-import { listPathwaysForGuest, publicPathway, saveGuest } from "@/lib/store";
+import { checkPathwayQuota } from "@/lib/ratelimit";
+import { listPathwayStarts, listPathwaysForGuest, publicPathway } from "@/lib/store";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -18,8 +19,12 @@ export async function POST(request: Request) {
   try {
     const guest = await getOrCreateGuest();
 
-    /* Checked before any LLM work so a blocked request costs nothing. */
-    const limit = checkPathwayLimit(guest);
+    /* Checked before any LLM work so a blocked request costs nothing. The
+       count comes from the pathway_starts rows; the route no longer writes a
+       timestamp, because createPathwayFromNotes records the start itself. */
+    const limit = checkPathwayQuota(
+      await listPathwayStarts(guest.id, PATHWAYS_PER_DAY),
+    );
     if (!limit.allowed) {
       return NextResponse.json(
         { error: limit.message, retryAt: limit.retryAt },
@@ -33,22 +38,37 @@ export async function POST(request: Request) {
     if (contentType.includes("multipart/form-data")) {
       const form = await request.formData();
       const pasted = String(form.get("notes") || "").trim();
-      const file = form.get("file");
+      const files: File[] = [];
+      for (const entry of form.getAll("file")) {
+        if (entry instanceof File && entry.size > 0) files.push(entry);
+      }
+
+      /* Pasted text comes first: it is this unit's own words, and a learner who
+         pasted the important part should not have it buried under a lecture
+         PDF. */
       const chunks: string[] = [];
       if (pasted) chunks.push(pasted);
-      if (file instanceof File && file.size > 0) {
-        chunks.push(await extractNotesFromUpload(file));
-      }
+      if (files.length) chunks.push(await extractNotesFromUploads(files));
       notes = chunks.join("\n\n").trim();
     } else {
       const body = (await request.json()) as { notes?: string };
       notes = String(body.notes || "").trim();
     }
 
-    /* Stamped before generating, so a run that fails partway still counts.
-       Otherwise repeated failures would each burn the full LLM budget. */
-    guest.lastPathwayAt = new Date().toISOString();
-    await saveGuest(guest);
+    /* Refused, not truncated. The notes are re-sent to the model for every
+       card AND every checkpoint — up to 20-40 calls — so an oversized dump is
+       both slow and expensive, and silently cutting it would produce a pathway
+       from notes the learner cannot see were dropped. */
+    if (notes.length > MAX_NOTES_CHARS) {
+      return NextResponse.json(
+        {
+          error: `Those notes are ${Math.round(notes.length / 1000)}k characters, over the ${
+            MAX_NOTES_CHARS / 1000
+          }k limit. Trim them, or split the unit across two pathways.`,
+        },
+        { status: 400 },
+      );
+    }
 
     const pathway = await createPathwayFromNotes(guest, notes);
     return NextResponse.json({ pathway: publicPathway(pathway) });

@@ -86,3 +86,57 @@ alter table guests add column if not exists user_id text;
 
 create unique index if not exists guests_user_idx
   on guests (user_id) where user_id is not null;
+
+/* ------------------------------------------------------------------ */
+/* Quota                                                               */
+/*                                                                     */
+/* One row per pathway STARTED, appended before any LLM work begins.    */
+/* The gate used to read guests.last_pathway_at, a single timestamp     */
+/* that can only express "one per window"; the rule is now N per        */
+/* rolling 24h, so the count has to come from rows. Appending is also   */
+/* race-free in a way a read-modify-write of the guest record is not:   */
+/* two concurrent generations can never lose or double a stamp.         */
+/*                                                                     */
+/* guests.last_pathway_at is left in place as a legacy mirror (like     */
+/* pathway_ids) so old rows stay readable; nothing reads it any more.   */
+/* ------------------------------------------------------------------ */
+
+create table if not exists pathway_starts (
+  id text primary key,
+  guest_id text not null references guests(id) on delete cascade,
+  started_at timestamptz not null default now()
+);
+
+create index if not exists pathway_starts_guest_idx
+  on pathway_starts (guest_id, started_at desc);
+
+/* ------------------------------------------------------------------ */
+/* Feedback                                                            */
+/*                                                                     */
+/* In-app reports, read straight from the Supabase SQL editor — the     */
+/* smallest thing that can answer "what is wrong with the output", and  */
+/* the only failure signal the app had before this was console.warn.    */
+/*                                                                     */
+/* pathway_id / node_id are set when the report is anchored to a card   */
+/* or a checkpoint, which is what makes it actionable: a report that    */
+/* knows which node it is about can be checked against the generator's  */
+/* own output. They are plain text, not foreign keys, so a report        */
+/* outlives the pathway it describes.                                   */
+/* ------------------------------------------------------------------ */
+
+create table if not exists feedback (
+  id text primary key,
+  -- Nullable: a report is kept even if the guest row is ever removed.
+  guest_id text references guests(id) on delete set null,
+  -- Account at report time, when there was one.
+  user_id text,
+  pathway_id text,
+  node_id text,
+  kind text not null default 'general',
+  body text not null,
+  page_url text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists feedback_created_idx on feedback (created_at desc);
+create index if not exists feedback_guest_idx on feedback (guest_id, created_at desc);

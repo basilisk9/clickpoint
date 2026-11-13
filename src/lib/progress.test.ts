@@ -1,18 +1,18 @@
 ﻿import { describe, expect, it } from "vitest";
 import {
   bannerState,
-  dailyGate,
   describeBackgroundFill,
-  describeDayDone,
+  describeQuota,
   firstOpenCard,
   focusNodeId,
-  formatCountdown,
   nextNode,
+  quotaGate,
   readyCardCount,
   summarizeProgress,
   totalCardCount,
 } from "./progress";
-import { PATHWAY_COOLDOWN_MS } from "./constants";
+import { PATHWAYS_PER_DAY, QUOTA_WINDOW_MS } from "./constants";
+import { formatWait } from "./ratelimit";
 import type { PathwayNode, PathwayRecord } from "./types";
 
 /* ------------------------------------------------------------------ */
@@ -385,86 +385,147 @@ describe("firstOpenCard", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* formatCountdown                                                     */
+/* formatCountdown — the wait string the gate shows                    */
 /* ------------------------------------------------------------------ */
 
 describe("formatCountdown", () => {
   it("formats hours and minutes together", () => {
-    expect(formatCountdown(19 * 3600_000 + 42 * 60_000)).toBe("19h 42m");
+    expect(formatWait(19 * 3600_000 + 42 * 60_000)).toBe("19h 42m");
   });
 
   it("drops a zero minute instead of writing 19h 0m", () => {
-    expect(formatCountdown(19 * 3600_000)).toBe("19h");
+    expect(formatWait(19 * 3600_000)).toBe("19h");
   });
 
   it("uses minutes under an hour", () => {
-    expect(formatCountdown(42 * 60_000)).toBe("42m");
+    expect(formatWait(42 * 60_000)).toBe("42m");
   });
 
   it("uses seconds under a minute and never rounds down to 0s", () => {
-    expect(formatCountdown(30_000)).toBe("30s");
+    expect(formatWait(30_000)).toBe("30s");
     /* A sub-second remainder must still read as pending, not as "0s done". */
-    expect(formatCountdown(10)).toBe("1s");
-    expect(formatCountdown(-5000)).toBe("1s");
+    expect(formatWait(10)).toBe("1s");
+    expect(formatWait(-5000)).toBe("1s");
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* dailyGate                                                           */
+/* quotaGate — N per rolling window, counted from start rows            */
 /* ------------------------------------------------------------------ */
 
-describe("dailyGate", () => {
+describe("quotaGate", () => {
   const NOW = Date.parse("2026-03-10T12:00:00.000Z");
+  const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
   it("unlocks a guest who has never generated", () => {
-    const gate = dailyGate(undefined, PATHWAY_COOLDOWN_MS, NOW);
+    const gate = quotaGate(undefined, NOW);
     expect(gate.locked).toBe(false);
+    expect(gate.used).toBe(0);
+    expect(gate.remaining).toBe(PATHWAYS_PER_DAY);
     expect(gate.retryAt).toBeNull();
     expect(gate.wait).toBeNull();
   });
 
-  it("unlocks on a garbage timestamp rather than locking the user out", () => {
-    /* Matches checkPathwayLimit: bad data must never cost someone the product. */
-    expect(dailyGate("not-a-date", PATHWAY_COOLDOWN_MS, NOW).locked).toBe(false);
-    expect(dailyGate("", PATHWAY_COOLDOWN_MS, NOW).locked).toBe(false);
+  it("ignores garbage timestamps rather than locking the user out", () => {
+    const gate = quotaGate(["not-a-date", ""], NOW);
+    expect(gate.locked).toBe(false);
+    expect(gate.used).toBe(0);
   });
 
-  it("locks inside the cooldown window and reports the remaining wait", () => {
-    const last = new Date(NOW - 4 * 3600_000).toISOString();
-    const gate = dailyGate(last, PATHWAY_COOLDOWN_MS, NOW);
+  it("stays unlocked below the limit and counts what it used", () => {
+    for (let count = 1; count < PATHWAYS_PER_DAY; count += 1) {
+      const starts = Array.from({ length: count }, (_, i) => ago((i + 1) * 60_000));
+      const gate = quotaGate(starts, NOW);
+      expect(gate.locked).toBe(false);
+      expect(gate.used).toBe(count);
+      expect(gate.remaining).toBe(PATHWAYS_PER_DAY - count);
+      expect(gate.retryAt).toBeNull();
+    }
+  });
+
+  it("locks exactly at the limit and reports when the oldest slot frees", () => {
+    const starts = Array.from({ length: PATHWAYS_PER_DAY }, (_, i) =>
+      ago((i + 1) * 60_000),
+    );
+    const gate = quotaGate(starts, NOW);
     expect(gate.locked).toBe(true);
-    expect(gate.wait).toBe("20h");
-    expect(gate.retryAt).toBe(new Date(NOW + 20 * 3600_000).toISOString());
+    expect(gate.used).toBe(PATHWAYS_PER_DAY);
+    expect(gate.remaining).toBe(0);
+    /* The oldest of the three is the first to age out. */
+    const oldest = NOW - PATHWAYS_PER_DAY * 60_000;
+    expect(gate.retryAt).toBe(new Date(oldest + QUOTA_WINDOW_MS).toISOString());
+    expect(gate.wait).toBe("23h 57m");
   });
 
-  it("unlocks exactly at the cooldown boundary, not one tick early", () => {
-    const exactly = new Date(NOW - PATHWAY_COOLDOWN_MS).toISOString();
-    expect(dailyGate(exactly, PATHWAY_COOLDOWN_MS, NOW).locked).toBe(false);
-
-    const oneMsShort = new Date(NOW - PATHWAY_COOLDOWN_MS + 1).toISOString();
-    expect(dailyGate(oneMsShort, PATHWAY_COOLDOWN_MS, NOW).locked).toBe(true);
+  it("frees a slot as soon as the oldest start leaves the window", () => {
+    /* Three starts, the oldest one exactly one millisecond past the window.
+       A quota of 3 means the two remaining are not enough to lock. */
+    const starts = [
+      ago(QUOTA_WINDOW_MS + 1),
+      ago(60_000),
+      ago(120_000),
+    ];
+    const gate = quotaGate(starts, NOW);
+    expect(gate.used).toBe(2);
+    expect(gate.locked).toBe(false);
+    expect(gate.remaining).toBe(1);
   });
 
-  it("stays unlocked well past the window", () => {
-    const last = new Date(NOW - 2 * PATHWAY_COOLDOWN_MS).toISOString();
-    expect(dailyGate(last, PATHWAY_COOLDOWN_MS, NOW).locked).toBe(false);
+  it("still locks at the boundary, one millisecond inside the window", () => {
+    const starts = Array.from({ length: PATHWAYS_PER_DAY }, () =>
+      ago(QUOTA_WINDOW_MS - 1),
+    );
+    expect(quotaGate(starts, NOW).locked).toBe(true);
+  });
+
+  it("counts only what is inside the window, however many rows exist", () => {
+    const starts = [
+      ago(QUOTA_WINDOW_MS * 3),
+      ago(QUOTA_WINDOW_MS * 2),
+      ago(QUOTA_WINDOW_MS + 5000),
+    ];
+    const gate = quotaGate(starts, NOW);
+    expect(gate.used).toBe(0);
+    expect(gate.remaining).toBe(PATHWAYS_PER_DAY);
   });
 });
 
-describe("describeDayDone", () => {
-  it("counts down when the guest is still inside the cooldown", () => {
-    const text = describeDayDone({
-      locked: true,
-      retryAt: "2026-03-11T08:00:00.000Z",
-      wait: "19h 42m",
-    });
-    expect(text).toContain("19h 42m");
-    expect(text).toContain("Pathway complete");
+describe("describeQuota", () => {
+  const NOW = Date.parse("2026-03-10T12:00:00.000Z");
+
+  it("counts down when the window is spent", () => {
+    const gate = quotaGate(
+      Array.from({ length: PATHWAYS_PER_DAY }, () => new Date(NOW - 3600_000).toISOString()),
+      NOW,
+    );
+    const text = describeQuota(gate);
+    expect(text).toContain("next one in 23h");
+    expect(text).toContain(`${PATHWAYS_PER_DAY} for today`);
   });
 
-  it("points at tomorrow when the cooldown has already lapsed", () => {
-    const text = describeDayDone({ locked: false, retryAt: null, wait: null });
-    expect(text).toBe("Pathway complete. Build the next one tomorrow.");
+  it("names how many are left, singular and plural", () => {
+    const one = describeQuota({
+      locked: false,
+      used: PATHWAYS_PER_DAY - 1,
+      remaining: 1,
+      retryAt: null,
+      wait: null,
+    });
+    expect(one).toBe("Pathway complete. 1 more pathway today.");
+
+    const two = describeQuota({
+      locked: false,
+      used: 1,
+      remaining: 2,
+      retryAt: null,
+      wait: null,
+    });
+    expect(two).toBe("Pathway complete. 2 more pathways today.");
+  });
+
+  it("never says one pathway per day, which is no longer the rule", () => {
+    const gate = quotaGate([], NOW);
+    expect(describeQuota(gate)).not.toMatch(/tomorrow|per day/i);
   });
 });
 
@@ -473,7 +534,8 @@ describe("describeDayDone", () => {
 /* ------------------------------------------------------------------ */
 
 describe("bannerState", () => {
-  const openGate = { locked: false, retryAt: null, wait: null };
+  const NOW = Date.parse("2026-03-10T12:00:00.000Z");
+  const openGate = quotaGate([], NOW);
 
   it("says we are writing the first card when nothing is readable yet", () => {
     const p = pathway({
@@ -503,10 +565,19 @@ describe("bannerState", () => {
       ],
       completedNodeIds: ["c1", "q1"],
     });
-    const state = bannerState(p, { locked: true, retryAt: "x", wait: "3h" });
+    const state = bannerState(
+      p,
+      quotaGate(
+        Array.from({ length: PATHWAYS_PER_DAY }, (_, i) =>
+          new Date(NOW - (i + 1) * 3600_000).toISOString(),
+        ),
+        NOW,
+      ),
+    );
     expect(state.kind).toBe("day-done");
     if (state.kind !== "day-done") throw new Error("unreachable");
-    expect(state.text).toContain("3h");
+    /* The oldest of the three (3h ago) is the slot that frees first: 24h - 3h. */
+    expect(state.text).toContain("21h");
   });
 
   it("prefers day-done over filling so a finished path never claims to be busy", () => {

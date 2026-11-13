@@ -8,8 +8,12 @@
 /* and the client cannot see inside that, so this drives an honest     */
 /* elapsed-time estimate over those three named stages.                */
 /*                                                                     */
-/* It is an estimate and the copy says so ("usually"): pretending to   */
-/* know the real server step would be a lie the first slow run exposes.*/
+/* It is an estimate and the copy says so ("usually"): pretending to
+   know the real server step would be a lie the first slow run exposes.
+
+   The first bound covers reading several files one after another, not one
+   PDF: a unit's notes arrive as a lecture deck plus a problem set, and unpdf
+   is the slowest part of the request. */
 /* ------------------------------------------------------------------ */
 
 export type UploadStage = {
@@ -20,8 +24,8 @@ export type UploadStage = {
 };
 
 export const UPLOAD_STAGES: readonly UploadStage[] = [
-  { id: "reading", label: "Reading your notes", until: 4_000 },
-  { id: "outline", label: "Drawing the syllabus and banner", until: 18_000 },
+  { id: "reading", label: "Reading your notes", until: 12_000 },
+  { id: "outline", label: "Drawing the syllabus and banner", until: 26_000 },
   { id: "card1", label: "Writing card 1", until: 60_000 },
 ] as const;
 

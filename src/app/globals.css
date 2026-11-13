@@ -129,6 +129,13 @@ body {
     padding: 9px 17px;
     font-size: 13px;
   }
+
+  /* The landing page's single call to action, sized to match the hero rather
+     than a form control. */
+  .btn-lg {
+    padding: 16px 32px;
+    font-size: 16px;
+  }
 }
 
 .grid-page { min-height: 100vh; }

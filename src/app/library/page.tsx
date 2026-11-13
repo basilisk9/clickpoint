@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FeedbackButton } from "@/components/FeedbackButton";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getSessionUser } from "@/lib/auth";
 import { requireGuest } from "@/lib/guest";
@@ -49,7 +50,7 @@ export default async function LibraryPage() {
           {pathways.length === 0 ? (
             <div className="rounded-[28px] border border-[#d5e0db] bg-white p-8">
               <p className="text-lg font-semibold">No pathways yet.</p>
-              <Link href="/" className="btn btn-primary mt-5">
+              <Link href="/new" className="btn btn-primary mt-5">
                 Make your first pathway
               </Link>
             </div>
@@ -74,6 +75,17 @@ export default async function LibraryPage() {
               </Link>
             ))
           )}
+        </div>
+
+        {/* The general box lives here, next to everything the learner has made,
+            rather than floating over every screen. Reports about a specific
+            card or question are asked for on those screens, where the node id
+            is available. */}
+        <div className="mt-10 max-w-xl">
+          <FeedbackButton
+            label="Something else? Send feedback"
+            targets={["bug", "idea", "general"]}
+          />
         </div>
       </main>
     </div>

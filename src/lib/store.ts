@@ -1,5 +1,11 @@
 import { Pool } from "pg";
-import type { GuestRecord, PathwayRecord, PathwaySummary } from "./types";
+import { createId } from "./ids";
+import type {
+  FeedbackInput,
+  GuestRecord,
+  PathwayRecord,
+  PathwaySummary,
+} from "./types";
 
 /* Postgres-backed store (Supabase). This replaces the old DATA_DIR filesystem
    store: the app used to need a mounted volume, which disqualified every free
@@ -44,7 +50,6 @@ function pool(): Pool {
 type GuestRow = {
   id: string;
   created_at: Date;
-  last_pathway_at: Date | null;
   pathway_ids: string[] | null;
 };
 
@@ -55,7 +60,7 @@ type GuestRow = {
    now propagate instead. */
 export async function getGuest(id: string): Promise<GuestRecord | null> {
   const { rows } = await pool().query<GuestRow>(
-    "select id, created_at, last_pathway_at, pathway_ids from guests where id = $1",
+    "select id, created_at, pathway_ids from guests where id = $1",
     [id],
   );
 
@@ -65,24 +70,17 @@ export async function getGuest(id: string): Promise<GuestRecord | null> {
   return {
     id: row.id,
     createdAt: row.created_at.toISOString(),
-    lastPathwayAt: row.last_pathway_at?.toISOString(),
     pathwayIds: row.pathway_ids ?? [],
   };
 }
 
 export async function saveGuest(guest: GuestRecord): Promise<void> {
   await pool().query(
-    `insert into guests (id, created_at, last_pathway_at, pathway_ids)
-     values ($1, $2, $3, $4)
+    `insert into guests (id, created_at, pathway_ids)
+     values ($1, $2, $3)
      on conflict (id) do update set
-       last_pathway_at = excluded.last_pathway_at,
        pathway_ids = excluded.pathway_ids`,
-    [
-      guest.id,
-      guest.createdAt,
-      guest.lastPathwayAt ?? null,
-      guest.pathwayIds,
-    ],
+    [guest.id, guest.createdAt, guest.pathwayIds],
   );
 }
 
@@ -176,6 +174,93 @@ export function publicPathway(pathway: PathwayRecord): PathwayRecord {
     ...pathway,
     rawNotes: "",
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Quota                                                               */
+/*                                                                     */
+/* One appended row per started pathway. The quota check reads these and */
+/* nothing else, so there is no counter to keep in step. The read is     */
+/* bounded by the limit: a guest can hold at most PATHWAYS_PER_DAY rows  */
+/* inside the window, so asking for any more would only ever fetch rows  */
+/* the checker is going to drop.                                        */
+/* ------------------------------------------------------------------ */
+
+export async function recordPathwayStart(guestId: string): Promise<void> {
+  await pool().query(
+    "insert into pathway_starts (id, guest_id) values ($1, $2)",
+    [createId("pst"), guestId],
+  );
+}
+
+export async function listPathwayStarts(
+  guestId: string,
+  limit: number,
+): Promise<string[]> {
+  const { rows } = await pool().query<{ started_at: Date }>(
+    `select started_at from pathway_starts
+      where guest_id = $1
+      order by started_at desc
+      limit $2`,
+    [guestId, limit],
+  );
+  return rows.map((row) => row.started_at.toISOString());
+}
+
+/* ------------------------------------------------------------------ */
+/* Feedback                                                            */
+/*                                                                     */
+/* Reports are read from the database directly; there is deliberately no */
+/* admin UI to maintain. Node-anchored reports carry their ids so the    */
+/* generated content they are about can still be found later.            */
+/* ------------------------------------------------------------------ */
+
+export async function saveFeedback(
+  id: string,
+  guestId: string | null,
+  userId: string | null,
+  input: FeedbackInput,
+): Promise<boolean> {
+  /* ON CONFLICT DO NOTHING because the id is derived from (guest, client
+     stamp): a retried send of the same report is the same row, not a second
+     one. `false` means this was a retry that already landed. */
+  const { rowCount } = await pool().query(
+    `insert into feedback (id, guest_id, user_id, pathway_id, node_id, kind, body, page_url)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     on conflict (id) do nothing`,
+    [
+      id,
+      guestId,
+      userId,
+      input.pathwayId ?? null,
+      input.nodeId ?? null,
+      input.kind,
+      input.body,
+      input.pageUrl ?? null,
+    ],
+  );
+  return rowCount === 1;
+}
+
+/* Whether this exact report already landed. The route asks this only when the
+   throttle would otherwise reject the send: a retry of a report that was stored
+   must succeed, even though it arrives inside the throttle window. */
+export async function feedbackExists(id: string): Promise<boolean> {
+  const { rows } = await pool().query("select 1 from feedback where id = $1", [id]);
+  return rows.length > 0;
+}
+
+/* Most recent report from this guest, as epoch ms, for the throttle. Server
+   time on both sides, so a wrong client clock cannot lock someone out. */
+export async function lastFeedbackAt(guestId: string): Promise<number | null> {
+  const { rows } = await pool().query<{ created_at: Date }>(
+    `select created_at from feedback
+      where guest_id = $1
+      order by created_at desc
+      limit 1`,
+    [guestId],
+  );
+  return rows[0] ? rows[0].created_at.getTime() : null;
 }
 
 /* Shared accessor for the connection pool. auth.ts needs the same pool — a

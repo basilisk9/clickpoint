@@ -1,9 +1,35 @@
-import { PATHWAY_COOLDOWN_MS } from "./constants";
-import type { GuestRecord } from "./types";
+import { PATHWAYS_PER_DAY, QUOTA_WINDOW_MS } from "./constants";
 
-export type RateLimitCheck =
-  | { allowed: true }
-  | { allowed: false; retryAt: string; message: string };
+/* ------------------------------------------------------------------ */
+/* The pathway quota.                                                  */
+/*                                                                     */
+/* "N per rolling 24h", counted from the pathway_starts table rather    */
+/* than from a single last-generated timestamp. A timestamp can only    */
+/* express "1 per window", and rewriting it into a counter in the guest */
+/* row would make it a read-modify-write: two concurrent generations    */
+/* could then either lose a stamp (a free pathway) or double-add one    */
+/* (a lost pathway, the worse failure). Rows appended by the database   */
+/* cannot race.                                                        */
+/*                                                                     */
+/* This module stays PURE and free of any database or Next import, so   */
+/* the client-side gate (progress.ts) calls the exact same counting     */
+/* code instead of reimplementing the rule. That is the whole reason    */
+/* the two can no longer disagree.                                     */
+/* ------------------------------------------------------------------ */
+
+export type QuotaState = {
+  /* Starts counted inside the window. */
+  used: number;
+  /* Slots left in the window. */
+  remaining: number;
+  /* When the OLDEST counted start ages out: the instant the next slot frees.
+     Null when nothing is counted. */
+  nextAt: string | null;
+};
+
+export type QuotaCheck =
+  | ({ allowed: true } & QuotaState)
+  | ({ allowed: false; retryAt: string; message: string } & QuotaState);
 
 /* "2h 15m", "45m", "30s" — readable at a glance, never "0h 0m". */
 export function formatWait(ms: number): string {
@@ -17,20 +43,44 @@ export function formatWait(ms: number): string {
   return `${seconds}s`;
 }
 
-/* One pathway per guest per rolling 24h. A missing or unparseable timestamp
-   is treated as "never generated", so old records and bad data never lock a
-   user out. */
-export function checkPathwayLimit(guest: GuestRecord, now = Date.now()): RateLimitCheck {
-  const last = guest.lastPathwayAt ? Date.parse(guest.lastPathwayAt) : NaN;
-  if (Number.isNaN(last)) return { allowed: true };
+/* Counts the starts that are still inside the window. A missing or
+   unparseable timestamp is dropped rather than counted: bad data must never
+   lock a user out of the product, and a dropped row can only ever be more
+   generous, never less. */
+export function quotaFrom(
+  starts: readonly string[] | null | undefined,
+  now: number = Date.now(),
+): QuotaState {
+  const cutoff = now - QUOTA_WINDOW_MS;
+  const inside = (starts ?? [])
+    .map((value) => Date.parse(value))
+    .filter((time) => Number.isFinite(time) && time > cutoff)
+    .sort((a, b) => a - b);
 
-  const elapsed = now - last;
-  if (elapsed >= PATHWAY_COOLDOWN_MS) return { allowed: true };
+  const used = inside.length;
+  return {
+    used,
+    remaining: Math.max(0, PATHWAYS_PER_DAY - used),
+    nextAt: used > 0 ? new Date(inside[0] + QUOTA_WINDOW_MS).toISOString() : null,
+  };
+}
 
-  const remaining = PATHWAY_COOLDOWN_MS - elapsed;
+export function checkPathwayQuota(
+  starts: readonly string[] | null | undefined,
+  now: number = Date.now(),
+): QuotaCheck {
+  const state = quotaFrom(starts, now);
+  if (state.remaining > 0) return { allowed: true, ...state };
+
+  /* `used === PATHWAYS_PER_DAY` implies a non-empty window, so nextAt is set;
+     the fallback only exists so the type cannot lie. */
+  const retryAt = state.nextAt ?? new Date(now + QUOTA_WINDOW_MS).toISOString();
   return {
     allowed: false,
-    retryAt: new Date(last + PATHWAY_COOLDOWN_MS).toISOString(),
-    message: `You've already built a pathway today. You can build your next one in ${formatWait(remaining)}.`,
+    ...state,
+    retryAt,
+    message: `You've built ${state.used} of ${PATHWAYS_PER_DAY} pathways today. The next one opens in ${formatWait(
+      Date.parse(retryAt) - now,
+    )}.`,
   };
 }

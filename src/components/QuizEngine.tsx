@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Rich } from "@/components/Rich";
 import { CORRECT_ANSWER_XP, QUIZ_LIVES, QUIZ_PASS_THRESHOLD } from "@/lib/constants";
 import type { PathwayNode, PathwayRecord, QuizQuestion } from "@/lib/types";
+import { FeedbackButton } from "@/components/FeedbackButton";
 
 /* ------------------------------------------------------------------ */
 /* Duolingo-style checkpoint.                                          */
@@ -293,7 +294,14 @@ export function QuizEngine({
   /* ---------------- results ---------------- */
   if (phase === "done") {
     return (
-      <Results pathway={pathway} questions={questions} correct={correctCount} total={total} log={log} />
+      <Results
+        pathway={pathway}
+        nodeId={node.id}
+        questions={questions}
+        correct={correctCount}
+        total={total}
+        log={log}
+      />
     );
   }
 
@@ -506,12 +514,16 @@ export function QuizEngine({
 
 function Results({
   pathway,
+  nodeId,
   questions,
   correct,
   total,
   log,
 }: {
   pathway: PathwayRecord;
+  /* The checkpoint node, so a report about a wrong answer key names the
+     checkpoint it is about instead of only the pathway. */
+  nodeId: string;
   questions: QuizQuestion[];
   correct: number;
   total: number;
@@ -588,13 +600,21 @@ function Results({
           </div>
         </div>
 
-        <div className="mt-8 flex justify-center">
+        <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
           <a
             href={`/path/${pathway.id}`}
             className="rounded-2xl bg-pine px-7 py-3.5 text-base font-bold text-white shadow-[0_4px_0_var(--color-pine-deep)] transition hover:brightness-110 active:translate-y-px"
           >
             Back to the pathway
           </a>
+          {/* The likeliest real bug in the whole app: a question whose key is
+              wrong. It is only visible from here, so this is where to ask. */}
+          <FeedbackButton
+            label="Question or answer key wrong?"
+            targets={["quiz-answer", "bug"]}
+            pathwayId={pathway.id}
+            nodeId={nodeId}
+          />
         </div>
       </div>
     </div>

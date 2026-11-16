@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       const previous = await lastFeedbackAt(guest.id).catch(() => null);
       if (isFeedbackThrottled(previous ?? NaN, Date.now())) {
         return NextResponse.json(
-          { error: "Got your last one — give it a minute before sending another." },
+          { error: "Got your last one — give it a few seconds before sending another." },
           { status: 429 },
         );
       }

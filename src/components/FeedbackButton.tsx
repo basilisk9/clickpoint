@@ -1,49 +1,82 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import {
   FEEDBACK_MAX,
   FEEDBACK_MIN,
   FEEDBACK_TARGETS,
+  type FeedbackTarget,
   type FeedbackTargetId,
 } from "@/lib/feedbackTargets";
 
 /* ------------------------------------------------------------------ */
 /* Feedback, anchored to what it is about.                             */
 /*                                                                     */
-/* A card page asks about the card; a checkpoint asks about the answer  */
-/* key. That is the feedback worth having, because the report arrives   */
-/* carrying the ids needed to check it against what the model actually  */
-/* wrote. The general box is the fallback, not the default — a floating */
-/* bubble on every screen would be the clutter this app is trying to    */
-/* get away from.                                                       */
+/* One floating widget, bottom-right, mounted in the root layout so    */
+/* every screen has it. The catalogue narrows by route: a card page    */
+/* asks about the card, a checkpoint asks about the answer key, and   */
+/* everything else falls back to the general list. The ids are read   */
+/* from the URL, so the report arrives carrying what a human needs to  */
+/* check it against what the model actually wrote.                    */
 /*                                                                     */
-/* The stamp is minted once per open form and reused by every retry, so */
-/* a send whose response was lost cannot leave two rows behind.         */
+/* The stamp is minted once per form fill and reused by every retry,   */
+/* so a send whose response was lost cannot leave two rows behind.     */
+/* "Send another" mints a fresh stamp: a new report, a new row.        */
 /* ------------------------------------------------------------------ */
 
-export function FeedbackButton({
-  label = "Send feedback",
-  targets,
-  pathwayId,
-  nodeId,
-}: {
-  label?: string;
-  /* Which questions this surface may ask. Narrower is better. */
-  targets: FeedbackTargetId[];
+/* Pathway and node ids are pulled out of the pathname, not passed in:
+   the widget is global, so its props cannot depend on the page. */
+function idsFromPathname(pathname: string): {
   pathwayId?: string;
   nodeId?: string;
-}) {
-  const catalogue = FEEDBACK_TARGETS.filter((target) => targets.includes(target.id));
+} {
+  /* /path/<id>/card/<nodeId> and /path/<id>/quiz/<nodeId> */
+  const focused = pathname.match(/^\/path\/([^/]+)\/(card|quiz)\/([^/]+)/);
+  if (focused) {
+    return { pathwayId: focused[1], nodeId: focused[3] };
+  }
+  /* /path/<id> */
+  const map = pathname.match(/^\/path\/([^/]+)$/);
+  if (map) return { pathwayId: map[1] };
+  return {};
+}
+
+function catalogueFor(pathname: string): FeedbackTarget[] {
+  if (/^\/path\/[^/]+\/card\//.test(pathname)) {
+    return FEEDBACK_TARGETS.filter((t) => t.id === "card-wrong" || t.id === "card-unclear");
+  }
+  if (/^\/path\/[^/]+\/quiz\//.test(pathname)) {
+    return FEEDBACK_TARGETS.filter((t) => t.id === "quiz-answer" || t.id === "bug");
+  }
+  return FEEDBACK_TARGETS.filter(
+    (t) => t.id === "bug" || t.id === "idea" || t.id === "general",
+  );
+}
+
+export function FeedbackButton() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [targetId, setTargetId] = useState<FeedbackTargetId>(catalogue[0]?.id ?? "general");
+  const [targetId, setTargetId] = useState<FeedbackTargetId>("bug");
   const [body, setBody] = useState("");
   const [status, setStatus] = useState<"idle" | "sending" | "done">("idle");
   const [error, setError] = useState("");
-  /* Minted on open, so a retry after a failed send is the same report. */
-  const [stamp] = useState(() => Date.now());
+  /* Minted per form fill, so a retry after a failed send is the same report. */
+  const [stamp, setStamp] = useState(() => Date.now());
 
-  const target = catalogue.find((item) => item.id === targetId) ?? catalogue[0];
+  const catalogue = catalogueFor(pathname);
+  const { pathwayId, nodeId } = idsFromPathname(pathname);
+  const target =
+    catalogue.find((item) => item.id === targetId) ?? catalogue[0];
+
+  /* A route change can invalidate the selected target (e.g. card → quiz);
+     fall back to the route's first option so the select never shows a
+     phantom choice. */
+  useEffect(() => {
+    if (!catalogue.some((item) => item.id === targetId)) {
+      setTargetId(catalogue[0]?.id ?? "bug");
+    }
+  }, [catalogue, targetId]);
 
   async function send() {
     setError("");
@@ -62,7 +95,7 @@ export function FeedbackButton({
           body: text,
           pathwayId,
           nodeId,
-          pageUrl: window.location.pathname,
+          pageUrl: pathname,
           at: stamp,
         }),
       });
@@ -75,28 +108,29 @@ export function FeedbackButton({
     }
   }
 
+  /* A fresh form fill: new stamp, blank body, catalogue re-derived by route.
+     Keeps the panel open for the next report without a round trip. */
+  function reset() {
+    setStamp(Date.now());
+    setBody("");
+    setError("");
+    setStatus("idle");
+  }
+
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="text-sm font-semibold text-[#5d726c] underline decoration-dotted underline-offset-4 hover:text-[#10231f]"
+        className="fixed bottom-5 right-5 z-50 rounded-full bg-[#0f766e] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(15,118,110,0.35)] transition hover:brightness-110"
       >
-        {label}
+        Send feedback
       </button>
     );
   }
 
-  if (status === "done") {
-    return (
-      <p className="text-sm font-semibold text-[#0f766e]">
-        Got it. Thanks — this goes straight to whoever can fix it.
-      </p>
-    );
-  }
-
   return (
-    <div className="rounded-2xl border border-[#d5e0db] bg-white p-4 text-left">
+    <div className="fixed bottom-5 right-5 z-50 w-[calc(100vw-2.5rem)] max-w-sm rounded-2xl border border-[#d5e0db] bg-white p-4 text-left shadow-[0_16px_48px_rgba(16,35,31,0.18)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-bold text-[#10231f]">
           {catalogue.length > 1 ? "What's wrong?" : target?.label}
@@ -112,7 +146,7 @@ export function FeedbackButton({
 
       {catalogue.length > 1 ? (
         <select
-          value={targetId}
+          value={target?.id ?? ""}
           onChange={(event) => setTargetId(event.target.value as FeedbackTargetId)}
           className="mt-3 w-full rounded-xl border border-[#d5e0db] bg-[#f7faf8] px-3 py-2 text-sm outline-none focus:border-[#0f766e]"
         >
@@ -145,6 +179,21 @@ export function FeedbackButton({
           {body.trim().length}/{FEEDBACK_MAX}
         </span>
       </div>
+
+      {status === "done" ? (
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-[#0f766e]">
+            Sent. Thank you.
+          </p>
+          <button
+            type="button"
+            onClick={reset}
+            className="text-sm font-semibold text-[#0f766e] underline decoration-dotted underline-offset-4 hover:text-[#10231f]"
+          >
+            Send another
+          </button>
+        </div>
+      ) : null}
 
       {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
     </div>

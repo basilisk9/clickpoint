@@ -14,9 +14,10 @@ import type { FeedbackInput, FeedbackKind } from "./types";
 /* but whose response was lost does not leave two rows behind.         */
 /* ------------------------------------------------------------------ */
 
-/* One report a minute. The form is for a human, not a script, so this only has
-   to stop a held-down button or a retry loop from filling the table. */
-export const FEEDBACK_THROTTLE_MS = 60_000;
+/* Ten seconds between reports. The form is for a human, not a script, so this
+   only has to stop a held-down button or a retry loop from filling the table —
+   while still letting someone report a second thing right after the first. */
+export const FEEDBACK_THROTTLE_MS = 10_000;
 
 export function normalizeFeedbackKind(value: unknown): FeedbackKind {
   const raw = String(value ?? "").trim().toLowerCase();

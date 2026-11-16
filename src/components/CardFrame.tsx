@@ -4,7 +4,6 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { PathwayNode, PathwayRecord } from "@/lib/types";
 import { CardRenderer } from "./CardRenderer";
-import { FeedbackButton } from "./FeedbackButton";
 
 export function CardFrame({
   pathway,
@@ -84,15 +83,6 @@ export function CardFrame({
       </div>
 
       <div className="shell flex flex-wrap items-center justify-between gap-4 py-8">
-        {/* The card is where a wrong formula or an invented example shows up,
-            so this is the highest-signal place to ask — and the button carries
-            the node id, which is what makes the report checkable. */}
-        <FeedbackButton
-          label="Something wrong with this card?"
-          targets={["card-wrong", "card-unclear"]}
-          pathwayId={pathway.id}
-          nodeId={node.id}
-        />
         <button
           onClick={finish}
           disabled={busy}

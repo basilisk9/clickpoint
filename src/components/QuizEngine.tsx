@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Rich } from "@/components/Rich";
 import { CORRECT_ANSWER_XP, QUIZ_LIVES, QUIZ_PASS_THRESHOLD } from "@/lib/constants";
 import type { PathwayNode, PathwayRecord, QuizQuestion } from "@/lib/types";
-import { FeedbackButton } from "@/components/FeedbackButton";
 
 /* ------------------------------------------------------------------ */
 /* Duolingo-style checkpoint.                                          */
@@ -151,9 +150,13 @@ function previousCardId(pathway: PathwayRecord, quizNodeId: string): string | nu
 export function QuizEngine({
   pathway,
   node,
+  signedIn = false,
 }: {
   pathway: PathwayRecord;
   node: PathwayNode;
+  /* Server-resolved, because this is a client component. Only decides whether
+     the results screen asks a guest to make an account. */
+  signedIn?: boolean;
 }) {
   const questions = node.quiz?.questions ?? [];
   const total = questions.length;
@@ -301,6 +304,7 @@ export function QuizEngine({
         correct={correctCount}
         total={total}
         log={log}
+        signedIn={signedIn}
       />
     );
   }
@@ -519,6 +523,7 @@ function Results({
   correct,
   total,
   log,
+  signedIn,
 }: {
   pathway: PathwayRecord;
   /* The checkpoint node, so a report about a wrong answer key names the
@@ -528,6 +533,7 @@ function Results({
   correct: number;
   total: number;
   log: boolean[];
+  signedIn: boolean;
 }) {
   const xp = correct * CORRECT_ANSWER_XP;
   const [shownXp, setShownXp] = useState(0);
@@ -575,6 +581,28 @@ function Results({
           ) : null}
         </div>
 
+        {/* The only moment in the product where the learner has something
+            worth keeping: they just cleared a checkpoint of their own
+            pathway. Signed-out, that work lives in a browser cookie; signing
+            up adopts the guest row (see /api/auth/signup), so this says so
+            plainly instead of the library's vaguer "only on this browser". */}
+        {passed && !signedIn ? (
+          <div className="mt-8 flex flex-wrap items-center justify-between gap-4 rounded-3xl border-2 border-pine/40 bg-pine/10 px-6 py-5">
+            <div>
+              <p className="font-semibold text-[#10231f]">
+                This pathway lives in this browser only.
+              </p>
+              <p className="mt-1 text-[14.5px] leading-relaxed text-[#5d726c]">
+                Create an account and everything you have built — this pathway and its XP —
+                comes with you.
+              </p>
+            </div>
+            <a href="/signup" className="btn btn-primary shrink-0">
+              Keep my pathways
+            </a>
+          </div>
+        ) : null}
+
         <div className="mt-10 rounded-3xl border border-[#d5e0db] bg-white p-5">
           <p className="font-mono text-[11.5px] font-bold uppercase tracking-[0.2em] text-[#8299a1]">
             question log
@@ -607,14 +635,6 @@ function Results({
           >
             Back to the pathway
           </a>
-          {/* The likeliest real bug in the whole app: a question whose key is
-              wrong. It is only visible from here, so this is where to ask. */}
-          <FeedbackButton
-            label="Question or answer key wrong?"
-            targets={["quiz-answer", "bug"]}
-            pathwayId={pathway.id}
-            nodeId={nodeId}
-          />
         </div>
       </div>
     </div>

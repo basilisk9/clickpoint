@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { FeedbackButton } from "@/components/FeedbackButton";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -27,7 +28,10 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="grid-page">{children}</body>
+      <body className="grid-page">
+        {children}
+        <FeedbackButton />
+      </body>
     </html>
   );
 }

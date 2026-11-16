@@ -145,7 +145,7 @@ export function PathwayView({
             )}
             <p className="text-sm font-semibold">{banner.text}</p>
             {banner.kind === "day-done" ? (
-              <Link href="/" className="ml-auto text-sm font-bold text-[#0f766e] no-underline">
+              <Link href="/new" className="ml-auto text-sm font-bold text-[#0f766e] no-underline">
                 Build the next one →
               </Link>
             ) : null}

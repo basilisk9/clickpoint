@@ -175,7 +175,7 @@ export function UploadForm({
             }
           />
           {fileNames.length === 0
-            ? "Upload PDF / PPTX / TXT (several at once is fine)"
+            ? "Upload PDF / PPTX / TXT"
             : `${fileNames.length} file${fileNames.length === 1 ? "" : "s"}`}
         </label>
         <button type="submit" disabled={busy} className="btn btn-primary">

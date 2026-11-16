@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { FeedbackButton } from "@/components/FeedbackButton";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getSessionUser } from "@/lib/auth";
 import { requireGuest } from "@/lib/guest";
@@ -25,7 +24,7 @@ export default async function LibraryPage() {
             <p className="text-sm font-semibold uppercase tracking-[0.22em] text-[#0f766e]">library</p>
             <h1 className="mt-3 text-5xl font-semibold tracking-tight">Your pathways</h1>
           </div>
-          <Link href="/" className="btn btn-primary btn-sm">
+          <Link href="/new" className="btn btn-primary btn-sm">
             New from notes
           </Link>
         </div>
@@ -76,17 +75,7 @@ export default async function LibraryPage() {
             ))
           )}
         </div>
-
-        {/* The general box lives here, next to everything the learner has made,
-            rather than floating over every screen. Reports about a specific
-            card or question are asked for on those screens, where the node id
-            is available. */}
-        <div className="mt-10 max-w-xl">
-          <FeedbackButton
-            label="Something else? Send feedback"
-            targets={["bug", "idea", "general"]}
-          />
-        </div>
+        {/* Feedback goes through the floating button on every screen. */}
       </main>
     </div>
   );

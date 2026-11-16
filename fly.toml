@@ -15,10 +15,10 @@ primary_region = 'ams'
 
 [env]
   HOSTNAME = '0.0.0.0'
-  LOGFARE_BASE_URL = 'https://ai.hackclub.com/proxy/v1'
+  LOGFARE_BASE_URL = 'https://logfare.ai/v1'
   LOGFARE_DISABLE_THINKING = 'true'
   LOGFARE_FALLBACK_MODELS = ''
-  LOGFARE_MODEL = 'z-ai/glm-5.3-flash'
+  LOGFARE_MODEL = 'glm-5.3'
   LOGFARE_REASONING_EFFORT = 'low'
   PORT = '3000'
 

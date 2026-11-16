@@ -5,7 +5,7 @@ Upload notes. Get a Duolingo-style pathway. Learn the card. Survive the checkpoi
 ## Setup
 
 1. Copy `.env.example` to `.env.local`
-2. Put your Hack Club AI key in `LOGFARE_API_KEY` (https://ai.hackclub.com)
+2. Put your Logfare key in `LOGFARE_API_KEY` (https://logfare.ai, `lfu_...`)
 3. Put your Postgres connection string in `DATABASE_URL` — records live in
    Postgres, so the app needs `db/schema.sql` applied once (it is idempotent):
    `psql "$DATABASE_URL" -f db/schema.sql`
@@ -16,8 +16,8 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Flow
 
-1. Landing page (`/`): what the product is, one real card as proof
-2. `/new`: paste notes or attach up to 6 files (PDF / PPTX / TXT / MD)
+1. Landing page (`/`): what the product is, plus a live pathway preview
+2. `/new`: paste notes or attach up to 6 files (PDF / PPTX / TXT / MD) — account required
 3. Wait for syllabus + banner + card 1, then read it
 4. Walk the pathway. Later cards generate in the background.
 5. Finish lesson → 8-question checkpoint → 75% unlocks the next card
@@ -30,13 +30,17 @@ with their pathway and node ids attached where the report was anchored, so query
 the table directly:
 
 ```sql
-select created_at, kind, node_id, body
+select created_at, kind, pathway_id, node_id, body
   from feedback
  order by created_at desc
  limit 50;
 ```
 
-Per-card and per-checkpoint reports are asked for on those screens (the button
-carries the node id); the library page has the general box.
+One floating "Send feedback" button sits bottom-right on every screen. Its
+catalogue narrows by route — a card page asks about the card, a checkpoint
+about the answer key, everything else gets bug/idea/general — and the pathway
+and node ids are read from the URL, so an anchored report can be checked
+against the generator's own output. The panel stays open after a send, so
+several reports can follow one another (server throttle: 10s).
 
 

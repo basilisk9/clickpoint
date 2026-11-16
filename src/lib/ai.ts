@@ -1,5 +1,5 @@
-const DEFAULT_BASE = "https://ai.hackclub.com/proxy/v1";
-const DEFAULT_MODEL = "z-ai/glm-5.3-flash";
+const DEFAULT_BASE = "https://logfare.ai/v1";
+const DEFAULT_MODEL = "glm-5.3";
 const DEFAULT_FALLBACK_MODELS = "";
 
 // Retryable calls loop forever until one succeeds (see chat/chatJson): a
@@ -69,9 +69,11 @@ type ModelConfig = {
   // chat-template hint that not every provider accepts.
   disableThinking: boolean;
   // OpenRouter-style `reasoning` object, for models whose thinking is
-  // mandatory and can only be throttled to an effort level (GLM 5.3 Flash:
-  // low | high | max). Sent only when LOGFARE_REASONING_EFFORT is set, since
-  // a model that needs it also needs the field omitted entirely otherwise.
+  // mandatory and can only be throttled to an effort level. glm-5.3 always
+  // reasons and defaults to `max`, which would spend most of a card's token
+  // budget before writing any HTML, so the deployment pins `low`. Sent only
+  // when LOGFARE_REASONING_EFFORT is set, since a model that does not accept
+  // the field needs it omitted entirely.
   reasoningEffort: string;
 };
 
@@ -106,7 +108,7 @@ function parseFallbacks(primary: string): string[] {
 function getConfig(): ModelConfig {
   const apiKey = process.env.LOGFARE_API_KEY;
   if (!apiKey) {
-    throw new Error("LOGFARE_API_KEY is missing. Paste your Hack Club AI key into .env.local.");
+    throw new Error("LOGFARE_API_KEY is missing. Paste your Logfare key into .env.local.");
   }
   const model = process.env.LOGFARE_MODEL || DEFAULT_MODEL;
   return {
@@ -365,7 +367,7 @@ async function performRequest(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      const error = `Hack Club AI ${response.status} on ${model}: ${
+      const error = `Logfare ${response.status} on ${model}: ${
         detail.slice(0, 300) || response.statusText
       }`;
       // A 400 while carrying the thinking-off hint usually means the provider
@@ -411,7 +413,7 @@ async function performRequest(
         model,
         status: null,
         retryable: true,
-        error: `Hack Club AI returned no text from ${servedBy}${detail}.`,
+        error: `Logfare returned no text from ${servedBy}${detail}.`,
         elapsedMs: Date.now() - began,
       };
     }
@@ -441,7 +443,7 @@ async function callModel(
     return await withTimeout(
       performRequest(config, model, messages, options, timeoutMs),
       timeoutMs,
-      `Hack Club AI request on ${model}`,
+      `Logfare request on ${model}`,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -450,7 +452,7 @@ async function callModel(
       model,
       status: null,
       retryable: true,
-      error: `Hack Club AI request failed on ${model}: ${message}`,
+      error: `Logfare request failed on ${model}: ${message}`,
       elapsedMs: Date.now() - began,
     };
   }

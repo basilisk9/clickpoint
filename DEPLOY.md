@@ -18,10 +18,11 @@ process, so an in-memory guard can never dedupe across them.
 
 | Variable | Purpose |
 | --- | --- |
-| `LOGFARE_API_KEY` | Hack Club AI key (`sk-hc-v1-...`). **Secret.** |
+| `LOGFARE_API_KEY` | Logfare key (`lfu_...`). **Secret.** |
 | `DATABASE_URL` | Postgres connection string. Must be Supabase's **pooler** (port 6543). |
-| `LOGFARE_BASE_URL` | Defaults to the Hack Club proxy. |
-| `LOGFARE_MODEL` | Defaults to `z-ai/glm-5.3-flash`. |
+| `LOGFARE_BASE_URL` | Defaults to `https://logfare.ai/v1`. |
+| `LOGFARE_MODEL` | Defaults to `glm-5.3`. |
+| `LOGFARE_REASONING_EFFORT` | Defaults to the model's own. `glm-5.3` reasons always and defaults to `max`; the deployment pins `low`. |
 
 `DATABASE_URL` must be the **pooler** connection string, not the direct one.
 Each serverless invocation opens its own connection, so the direct port (5432)
@@ -102,7 +103,7 @@ fly ips allocate-v6 -a clickpoint
 
 # The LLM key and the database. Neither is in the repo; the app cannot
 # generate a pathway without them.
-fly secrets set LOGFARE_API_KEY=sk-hc-v1-... -a clickpoint
+fly secrets set LOGFARE_API_KEY=lfu_... -a clickpoint
 fly secrets set DATABASE_URL=postgresql://...pooler...:6543/postgres -a clickpoint
 ```
 
@@ -114,6 +115,14 @@ No volume is needed — records live in Postgres.
 curl -s https://clickpoint.fly.dev/api/pathways
 # {"guestId":"gst_...","pathways":[]}
 
+# Building a pathway is account-only. An anonymous POST runs the LLM-free
+# gauntlet first, so it is cheap to prove the gate:
+curl -s -w '\nHTTP %{http_code}\n' -X POST https://clickpoint.fly.dev/api/pathways \
+  -H 'Content-Type: application/json' \
+  --data-binary '{"notes":"..."}'
+# {"error":"Sign in to build a pathway."}
+# HTTP 401
+
 # Confirm records are landing in Postgres, not on disk:
 psql "$DATABASE_URL" -c 'select id, status, created_at from pathways order by created_at desc limit 5'
 ```
@@ -124,14 +133,13 @@ the `pathways` table for a new row rather than assuming a failure.
 
 ### Quota check
 
-The guest cookie is named **`clickpoint_guest`** (not `cp_guest`). Once three
-pathways have been started inside the rolling 24h window, the next `POST`
-returns:
+Once three pathways have been started inside the rolling 24h window, the next
+`POST` from that account returns:
 
 ```sh
 curl -s -w '\nHTTP %{http_code}\n' -X POST https://clickpoint.fly.dev/api/pathways \
   -H 'Content-Type: application/json' \
-  -H 'cookie: clickpoint_guest=gst_...' \
+  -H 'cookie: clickpoint_session=...' \
   --data-binary '{"notes":"..."}'
 # {"error":"You've built 3 of 3 pathways today. The next one opens in 23h 56m.","retryAt":"..."}
 # HTTP 429
@@ -139,15 +147,14 @@ curl -s -w '\nHTTP %{http_code}\n' -X POST https://clickpoint.fly.dev/api/pathwa
 
 The count comes from the `pathway_starts` table (one row per started pathway,
 appended by `createPathwayFromNotes`), not from a single timestamp — see
-`src/lib/ratelimit.ts`. To reset a guest's quota for testing:
+`src/lib/ratelimit.ts`. To reset a quota for testing:
 
 ```sql
 delete from pathway_starts where guest_id = 'gst_...';
 ```
 
-An unrecognized or missing cookie mints a **new** guest instead of erroring, so
-a wrong cookie name looks like the limit silently not working. Check that the
-`guestId` in the response matches the cookie you sent.
+In all these checks the **`clickpoint_session`** cookie must name a live session
+row: an anonymous request is refused with 401 before the quota is even read.
 
 ### If the app is down
 
@@ -243,11 +250,11 @@ quota working.
   exactly one `pathway_starts` row was appended.
 - Feedback over HTTP: a first report → `{ok:true,duplicate:false}`; the same
   stamp retried → `{ok:true,duplicate:true}` with still one row; a different
-  report inside the throttle window → `429`.
+  report inside the throttle window (10s) → `429`.
 - Browser click-through of the checkpoint to the results screen (choices,
-  check, continue ×8, XP counter, question log), and both feedback surfaces
-  driven through the real UI: card report saved with `node_id`, checkpoint
-  report saved with `node_id`.
+  check, continue ×8, XP counter, question log). The floating "Send feedback"
+  button was driven through the real UI: a card report saved with `node_id`,
+  then "Send another" from the same panel saved a second row.
 - Note the ordering fix this found: the throttle used to be checked before the
   duplicate check, so retrying a report that had already been stored returned
   `429` — an error for a report that was in fact saved. The duplicate check now

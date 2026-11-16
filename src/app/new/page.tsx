@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
 import { UploadForm } from "@/components/UploadForm";
 import { getSessionUser } from "@/lib/auth";
@@ -12,12 +13,18 @@ export const metadata = { title: "new pathway · clickpoint." };
    interaction (30-100s), and a first-time visitor should meet the product
    before they meet a progress bar.
 
+   Account-only: a pathway costs real LLM calls and lives in the guest row an
+   account owns, so building anonymously just orphans the work. Redirects to
+   sign in with ?next=/new so auth returns here.
+
    The quota is read here rather than in the form so the locked state renders
    correctly on the first paint: the form can then tick its own countdown
    without a second request. */
 export default async function NewPathwayPage() {
-  const guest = await getOrCreateGuest().catch(() => null);
   const account = await getSessionUser().catch(() => null);
+  if (!account) redirect("/signin?next=/new");
+
+  const guest = await getOrCreateGuest().catch(() => null);
   const starts = guest
     ? await listPathwayStarts(guest.id, PATHWAYS_PER_DAY).catch(() => [])
     : [];
@@ -34,8 +41,7 @@ export default async function NewPathwayPage() {
           Dump the unit.
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-8 text-[#5d726c]">
-          Paste the notes, or attach up to {MAX_UPLOAD_FILES} files. You wait for the first
-          card, then read while the rest write themselves.
+          Paste the notes, or attach up to {MAX_UPLOAD_FILES} files.
         </p>
 
         <div className="mt-8 max-w-3xl">

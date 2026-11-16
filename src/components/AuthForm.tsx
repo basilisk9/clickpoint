@@ -37,10 +37,13 @@ export function AuthForm({ mode }: { mode: Mode }) {
 
     setBusy(true);
     try {
+      /* Where a gated page sent this visitor; read here rather than via
+         useSearchParams so the page needs no Suspense boundary. */
+      const next = new URLSearchParams(window.location.search).get("next");
       const response = await fetch(`/api/auth/${mode}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username, password, next }),
       });
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;

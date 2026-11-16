@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSessionUser } from "@/lib/auth";
 import { MAX_NOTES_CHARS, PATHWAYS_PER_DAY } from "@/lib/constants";
 import { extractNotesFromUploads } from "@/lib/extract";
 import { getOrCreateGuest } from "@/lib/guest";
@@ -15,10 +16,20 @@ export async function GET() {
   return NextResponse.json({ guestId: guest.id, pathways });
 }
 
+/* Building a pathway costs real LLM calls, so it is account-only. getOrCreateGuest
+   mints a guest row for anyone, so the session check must come first. */
 export async function POST(request: Request) {
-  try {
-    const guest = await getOrCreateGuest();
+  const account = await getSessionUser().catch(() => null);
+  if (!account) {
+    return NextResponse.json(
+      { error: "Sign in to build a pathway." },
+      { status: 401 },
+    );
+  }
 
+  const guest = await getOrCreateGuest();
+
+  try {
     /* Checked before any LLM work so a blocked request costs nothing. The
        count comes from the pathway_starts rows; the route no longer writes a
        timestamp, because createPathwayFromNotes records the start itself. */

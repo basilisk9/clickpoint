@@ -258,6 +258,15 @@ export async function getSessionUser(): Promise<AuthUser | null> {
   return { id: row.id, username: row.username, guestId: row.guest_id };
 }
 
+/* A "next" parameter for post-auth redirects. Only same-app relative paths
+   pass: an open redirect to an attacker's site would otherwise ride the auth
+   flows, and the leading slash also blocks protocol-relative "//evil.com". */
+export function safeNextPath(value: unknown): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  if (!value.startsWith("/") || value.startsWith("//")) return null;
+  return value;
+}
+
 /* ------------------------------------------------------------------ */
 /* Users                                                               */
 /* ------------------------------------------------------------------ */

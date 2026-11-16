@@ -5,6 +5,7 @@ import {
   findUserByUsername,
   mergeGuestIntoAccount,
   normalizeUsername,
+  safeNextPath,
   setSessionCookie,
   verifyPassword,
 } from "@/lib/auth";
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       username?: unknown;
       password?: unknown;
+      next?: unknown;
     };
     const username = normalizeUsername(body.username);
     const password = typeof body.password === "string" ? body.password : "";
@@ -62,7 +64,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       user: { id: user.id, username: user.username },
       guestId: user.guestId,
-      redirectTo: "/library",
+      redirectTo: safeNextPath(body.next) ?? "/library",
     });
   } catch (error) {
     const message =

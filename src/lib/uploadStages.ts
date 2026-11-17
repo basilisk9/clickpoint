@@ -26,7 +26,7 @@ export type UploadStage = {
 export const UPLOAD_STAGES: readonly UploadStage[] = [
   { id: "reading", label: "Reading your notes", until: 12_000 },
   { id: "outline", label: "Drawing the syllabus and banner", until: 26_000 },
-  { id: "card1", label: "Writing card 1", until: 60_000 },
+  { id: "card1", label: "Writing cards", until: 60_000 },
 ] as const;
 
 /* Stage index for a given elapsed time. Clamped to the last stage so a run

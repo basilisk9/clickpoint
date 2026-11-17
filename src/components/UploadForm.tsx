@@ -42,8 +42,8 @@ export function UploadForm({
   const [busy, setBusy] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [startedAt, setStartedAt] = useState(0);
-  /* One clock for both clocks on this page: the stage estimate while a request
-     is in flight, and the countdown on the locked panel. */
+  /* Drives the locked-panel countdown only. The stage checklist runs off
+     `elapsed`, which is a separate, faster clock. */
   const [now, setNow] = useState(() => Date.now());
 
   const until = lockedUntil ? Date.parse(lockedUntil) : NaN;
@@ -179,7 +179,7 @@ export function UploadForm({
             : `${fileNames.length} file${fileNames.length === 1 ? "" : "s"}`}
         </label>
         <button type="submit" disabled={busy} className="btn btn-primary">
-          {busy ? "Building your path…" : "Make the pathway"}
+          {busy ? "Making pathway…" : "Make the pathway"}
         </button>
       </div>
 
@@ -202,15 +202,9 @@ export function UploadForm({
 
       {busy ? (
         <div className="mt-5 rounded-2xl border border-[#d5e0db] bg-[#f7faf8] p-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-bold text-[#10231f]">
-              {states.find((item) => item.state === "active")?.stage.label}
-              <span className="text-[#5d726c]">…</span>
-            </p>
-            <p className="font-mono text-xs text-[#5d726c]">
-              {Math.floor(elapsed / 1000)}s
-            </p>
-          </div>
+          <p className="text-sm font-bold text-[#10231f]">
+            Making pathway<span className="text-[#5d726c]">…</span>
+          </p>
           {/* Width is an estimate, so the bar is capped at 95%: a full bar
               before the response lands would be a lie the first slow run
               exposes. */}
@@ -242,10 +236,6 @@ export function UploadForm({
               </li>
             ))}
           </ol>
-          <p className="mt-3 text-sm leading-6 text-[#5d726c]">
-            Usually under a minute. Later cards keep writing in the background —
-            you can start reading card 1 as soon as it lands.
-          </p>
         </div>
       ) : null}
 

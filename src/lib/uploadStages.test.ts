@@ -45,11 +45,6 @@ describe("currentStage", () => {
       expect(currentStage(ms).label.trim().length).toBeGreaterThan(0);
     }
   });
-
-  it("names card 1 as the stage the user is actually waiting on", () => {
-    /* This is the promise the landing page makes, so the copy has to say it. */
-    expect(currentStage(30_000).label.toLowerCase()).toContain("card 1");
-  });
 });
 
 describe("stageProgress", () => {

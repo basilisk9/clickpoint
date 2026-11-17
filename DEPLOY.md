@@ -21,8 +21,8 @@ process, so an in-memory guard can never dedupe across them.
 | `LOGFARE_API_KEY` | Logfare key (`lfu_...`). **Secret.** |
 | `DATABASE_URL` | Postgres connection string. Must be Supabase's **pooler** (port 6543). |
 | `LOGFARE_BASE_URL` | Defaults to `https://logfare.ai/v1`. |
-| `LOGFARE_MODEL` | Defaults to `glm-5.3`. |
-| `LOGFARE_REASONING_EFFORT` | Defaults to the model's own. `glm-5.3` reasons always and defaults to `max`; the deployment pins `low`. |
+| `LOGFARE_MODEL` | Defaults to `deepseek-v4.1-flash-1017`. |
+| `LOGFARE_REASONING_EFFORT` | Defaults to the model's own. The default model reasons optionally and defaults to `high`; the deployment pins `low`. |
 
 `DATABASE_URL` must be the **pooler** connection string, not the direct one.
 Each serverless invocation opens its own connection, so the direct port (5432)

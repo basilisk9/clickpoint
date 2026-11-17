@@ -18,7 +18,7 @@ primary_region = 'ams'
   LOGFARE_BASE_URL = 'https://logfare.ai/v1'
   LOGFARE_DISABLE_THINKING = 'true'
   LOGFARE_FALLBACK_MODELS = ''
-  LOGFARE_MODEL = 'glm-5.3'
+  LOGFARE_MODEL = 'deepseek-v4.1-flash-1017'
   LOGFARE_REASONING_EFFORT = 'low'
   PORT = '3000'
 

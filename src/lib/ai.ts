@@ -1,5 +1,5 @@
 const DEFAULT_BASE = "https://logfare.ai/v1";
-const DEFAULT_MODEL = "glm-5.3";
+const DEFAULT_MODEL = "deepseek-v4.1-flash-1017";
 const DEFAULT_FALLBACK_MODELS = "";
 
 // Retryable calls loop forever until one succeeds (see chat/chatJson): a
@@ -68,12 +68,12 @@ type ModelConfig = {
   // and 298 with it off. Opt in per deployment, because the flag is a
   // chat-template hint that not every provider accepts.
   disableThinking: boolean;
-  // OpenRouter-style `reasoning` object, for models whose thinking is
-  // mandatory and can only be throttled to an effort level. glm-5.3 always
-  // reasons and defaults to `max`, which would spend most of a card's token
-  // budget before writing any HTML, so the deployment pins `low`. Sent only
-  // when LOGFARE_REASONING_EFFORT is set, since a model that does not accept
-  // the field needs it omitted entirely.
+  // OpenRouter-style `reasoning` object, for models whose thinking can be
+  // throttled to an effort level. deepseek-v4.1-flash-1017 reasons optionally
+  // (max | high | low | none) and defaults to "high", so the deployment pins
+  // `low` to keep the token budget on the visible card. Sent only when
+  // LOGFARE_REASONING_EFFORT is set, since a model that does not accept the
+  // field needs it omitted entirely.
   reasoningEffort: string;
 };
 

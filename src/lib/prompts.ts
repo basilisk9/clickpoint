@@ -76,6 +76,24 @@ A separate quiz engine will follow this card. Do not write a quiz. Do not write 
 
 The card exists to produce one feeling: "oh shit, now it all makes sense." That feeling is the product, and it almost always comes from compression — twelve things collapsing into one method, one picture, or one table you can read in two directions.
 
+## THE BUDGET — read this before anything else
+
+A card is a SCREEN the learner skims and plays, not a chapter they read. Cards that run long do not feel generous, they feel like homework, and the learner leaves.
+
+**The whole card must stay under 450 words of prose.** That is the sum of every prose field — lead, every section's intro/premise/caption/readAcross/text/detail, every move's body and check, every example's prompt, steps and takeaway. Treat it as a hard ceiling, not a target.
+
+Per-field ceilings, so one field cannot eat the whole budget:
+
+- lead: 35 words. A hook, not a summary. It states the compression and stops.
+- callout text: 25 words · detail: 20 words
+- section intro / premise / readAcross: 20 words
+- any caption: 15 words
+- derivation step body: 18 words · aside: 15 words
+- move body: 20 words · check: 15 words · trigger: 6 words
+- example prompt: 25 words · takeaway: 12 words. **A takeaway is one short sentence, never a paragraph.**
+
+Cut in this order: first delete anything that restates the lead, then delete hedges and buildup, then cut the number of sections. Never cut the numbers, the formulas, or the specific detail that makes the idea real — cut the words around them.
+
 ## You choose the shape
 
 There is no template. A card is an ORDERED LIST of sections, and you decide which sections exist and in what order. Two cards about the same chapter may be built completely differently, and they should be — a dictionary-shaped idea wants a table you read across; a derivation-shaped idea wants the algebra laid out; a definitional idea may need nothing but sharp prose and a good example.
@@ -95,15 +113,33 @@ Order matters and is yours to choose. A good default is: figure → the invarian
 
 ## The figure library
 
-Figures are interactive scenes that already exist as React components. You pick one by id and set the seed values; you never write the drawing code. Pick the scene whose idea is YOUR idea. If none of them teaches this concept, use "none" — a wrong figure is worse than no figure.
+Figures are interactive scenes that already exist as React components. You pick one by id and set the seed values; you never write the drawing code.
+
+**The figure must be the fastest way to understand the idea.** It is not decoration and it is not a checkbox. A figure that technically relates to the topic but does not teach it is worse than no figure: it tells the learner the product is padding, and they stop trusting the rest of the card. If the scene would make a learner drag something and learn nothing, use "none" and write a sharper card without it.
+
+So: pick the scene whose MECHANISM is the card's mechanism — the same thing varies, and the same thing moves. Ask "when the learner drags this, does the idea become obvious?" If no, use "none".
+
+The scenes are physics-flavoured, but their cores are general:
+
+- accumulation / area under a curve / "add it all up" → \`work-area\` — use when the lesson IS the adding-up, not when a total merely appears in it
+- rate of change / slope / "how fast does it grow" → \`line-slope\` — use when the lesson turns on reading a rate off a shape
+- balance / conservation / a total split between parts → \`energy-bars\` — use when the lesson IS the invariant between the parts
+- equilibrium / a peak or valley / "where does it settle" → \`energy-landscape\` — use when the lesson is about flat spots, stability, or where a system comes to rest
+- ratio across a radius / anything scaling with distance from a centre → \`rotation-disk\`
+- splitting one quantity into orthogonal parts → \`vector-components\`
+- a repeating cycle / period / phase → \`oscillation\`
+
+Most cards should have a figure when they are about how something moves, accumulates, balances, or settles. Cards about naming, classification, sequence, or argument (a taxonomy, a timeline, a proof by cases, a set of definitions) should not — for those, "none" is the right answer and the card must earn its keep with a table, a dictionary, or a tight derivation instead.
 
 ${sceneMenu()}
+
+**Vary the scene across the pathway.** You are writing one card in a sequence, and the learner sees the whole run. If three cards in a row all open on the same figure, the pathway feels like one card repeated and the figure stops teaching. When you are told what earlier cards in this pathway already used, pick a DIFFERENT scene if a different one genuinely teaches your idea — or write the card with "none" and a stronger table/derivation/examples instead of reusing the same visual a fourth time.
 
 For a figure section: { "kind": "figure", "title": "...", "visual": { "kind": "disk", "scene": "rotation-disk", "params": { "radius": 0.4 }, "heading": "...", "chips": ["..."] }, "intro": "what to drag and what to watch", "caption": "the reading of the figure" }
 
 visual.kind is the scene FAMILY ("landscape", "bars", "area", "disk", "vector", "plot", "oscillation", "none") and visual.scene is the exact id from the library above. Both must describe the same figure.
 
-The intro must tell the learner what to move and what to look for. The caption must state what the figure proves — not describe it.
+The intro must tell the learner what to move and what to look for. The caption must state what the figure proves — not describe it. If you cannot write a caption that proves something, you picked the wrong scene.
 
 ## Richtext
 
@@ -132,7 +168,8 @@ Table and dictionary cells are richtext, so math inside a cell uses $...$. Do no
 - A derivation's steps must each follow from the last, one line of reasoning per step. No skipped algebra.
 - A dictionary's columns must genuinely correspond row by row: the row you pair must be the row that transforms into its twin, and the bridge column must be the rule that does the transforming.
 - A "check" is a concrete way to test whether a rule applies — a quick numeric or limiting-case sanity test, not a restatement.
-- Prefer fewer, sharper sections over comprehensive coverage. A card that nails one idea beats one that skims four. Four to seven sections is the usual size.
+- Prefer fewer, sharper sections over comprehensive coverage. A card that nails one idea beats one that skims four. **Three to five sections is the usual size; six is the limit.** A card with seven sections is a chapter and the learner will not finish it.
+- At least one section should make the learner work: a figure to drag, or an examples ramp to work through. For a card with no fitting figure, the examples ramp is what makes it active — so make those examples real, not rhetorical.
 - Give the card a "nextUp": the title of the lesson that follows, so the learner knows where this leads.
 
 ## Levels
@@ -231,11 +268,15 @@ export function cardUser(
   topic: string,
   title: string,
   nextTitle?: string,
+  usedScenes: string[] = [],
 ) {
   const next = nextTitle
     ? `\n\nNEXT LESSON IN THE PATHWAY (use it for nextUp): ${nextTitle}`
     : "\n\nThis is the last lesson in the pathway, so leave nextUp out.";
-  return `ASSIGNED CARD TITLE: ${title}\n\nASSIGNED TOPIC:\n${topic}${next}\n\nRAW NOTES:\n\n${rawNotes}`;
+  const scenes = usedScenes.length
+    ? `\n\nFIGURES ALREADY USED IN THIS PATHWAY (avoid repeating these unless one is genuinely the best fit): ${usedScenes.join(", ")}`
+    : "";
+  return `ASSIGNED CARD TITLE: ${title}\n\nASSIGNED TOPIC:\n${topic}${next}${scenes}\n\nRAW NOTES:\n\n${rawNotes}`;
 }
 
 export function quizUser(rawNotes: string, topic: string, title: string) {

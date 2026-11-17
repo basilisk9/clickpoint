@@ -5,6 +5,11 @@ export const FINISH_LESSON_XP = 10;
 export const CORRECT_ANSWER_XP = 5;
 export const QUIZ_PASS_THRESHOLD = 0.75;
 
+/* The card's own reward, before the checkpoint: reading it is worth as much
+   as the checkpoint, because reading it IS the lesson. Shown as a live
+   counter so the card feels like progress, not a wall of text. */
+export const CARD_READ_XP = 10;
+
 export const MIN_LESSONS = 2;
 export const MAX_LESSONS = 10;
 export const QUESTIONS_PER_QUIZ = 8;

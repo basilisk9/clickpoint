@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment } from "react";
+import { Fragment, useCallback, useEffect, useRef } from "react";
 import type { CardSection, CardSpec } from "@/lib/types";
 import { sectionsOf } from "@/lib/card";
 import { CardVisual } from "./CardVisual";
@@ -91,7 +91,7 @@ function SectionBody({ section, accent }: { section: CardSection; accent: Accent
                   key={i}
                   className="rounded-md border border-[color:var(--card-line)] bg-[color:var(--card-surface)] px-2 py-0.5 font-mono text-[11px] font-semibold text-[color:var(--ink-soft)]"
                 >
-                  {chip}
+                  <Rich text={chip} />
                 </span>
               ))}
             </div>
@@ -468,18 +468,45 @@ function SectionBody({ section, accent }: { section: CardSection; accent: Accent
 }
 
 /* One section, one shell. Alternating tints give the card a rhythm without
-   any per-card styling: the model never picks a colour or a background. */
+   any per-card styling: the model never picks a colour or a background.
+
+   Each block also reports when it first scrolls into view, which is what
+   drives the card's progress bar — the learner watches the card fill as they
+   read, instead of facing a page with no end in sight. */
 function SectionBlock({
   section,
   accent,
   alt,
+  onSeen,
 }: {
   section: CardSection;
   accent: Accent;
   alt: boolean;
+  onSeen?: () => void;
 }) {
+  const ref = useRef<HTMLElement>(null);
+  const reported = useRef(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !onSeen) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !reported.current) {
+          reported.current = true;
+          onSeen();
+          observer.disconnect();
+        }
+      },
+      { threshold: 0.35 },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [onSeen]);
+
   return (
     <section
+      ref={ref}
       className={`border-t border-[color:var(--card-line)] px-6 py-8 sm:px-10 ${
         alt ? "bg-[color:var(--paper)]" : ""
       }`}
@@ -492,9 +519,35 @@ function SectionBlock({
 }
 
 
-export function CardRenderer({ spec }: { spec: CardSpec }) {
+export function CardRenderer({
+  spec,
+  onProgress,
+}: {
+  spec: CardSpec;
+  /* Reports how many sections the learner has actually reached, so the
+     card's progress bar can fill. Optional: the renderer works without it. */
+  onProgress?: (seen: number, total: number) => void;
+}) {
   const accent = ACCENTS[spec.accent] ?? ACCENTS.pine;
   const sections = sectionsOf(spec);
+  const seenRef = useRef(0);
+  const totalRef = useRef(sections.length);
+  /* Held in a ref: the callback is a new function on every parent render, and
+     depending on it directly would re-run the reset effect below and wipe the
+     count the learner just built up. */
+  const progressRef = useRef(onProgress);
+  progressRef.current = onProgress;
+
+  useEffect(() => {
+    totalRef.current = sections.length;
+    seenRef.current = 0;
+    progressRef.current?.(0, sections.length);
+  }, [sections.length]);
+
+  const markSeen = useCallback(() => {
+    seenRef.current += 1;
+    progressRef.current?.(seenRef.current, totalRef.current);
+  }, []);
 
   return (
     <article className="overflow-hidden rounded-[24px] border border-[color:var(--card-line)] bg-[color:var(--card-surface)] shadow-[0_24px_70px_-40px_rgba(19,42,50,0.5)]">
@@ -508,14 +561,14 @@ export function CardRenderer({ spec }: { spec: CardSpec }) {
             className="rounded-full px-2.5 py-1 font-mono text-[11px] font-bold uppercase tracking-wider"
             style={{ background: accent.soft, color: accent.deep }}
           >
-            {spec.metaAccent}
+            <Rich text={spec.metaAccent} />
           </span>
           {spec.metaNeutral.map((chip, i) => (
             <span
               key={i}
               className="rounded-full border border-[color:var(--card-line)] bg-[color:var(--paper2)] px-2.5 py-1 font-mono text-[11px] font-semibold text-[color:var(--ink-soft)]"
             >
-              {chip}
+              <Rich text={chip} />
             </span>
           ))}
         </div>
@@ -542,6 +595,7 @@ export function CardRenderer({ spec }: { spec: CardSpec }) {
           section={section}
           accent={accent}
           alt={i % 2 === 1}
+          onSeen={markSeen}
         />
       ))}
 

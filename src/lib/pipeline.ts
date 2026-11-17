@@ -24,6 +24,7 @@ import {
   savePathway,
 } from "./store";
 import type {
+  CardSection,
   CardSpec,
   GuestRecord,
   LessonPlan,
@@ -176,13 +177,14 @@ async function generateCard(
   rawNotes: string,
   lesson: LessonPlan,
   nextTitle?: string,
+  usedScenes: string[] = [],
 ): Promise<CardSpec> {
   const raw = await chatJson<CardSpec>(
     [
       { role: "system", content: CARD_SYSTEM },
       {
         role: "user",
-        content: cardUser(rawNotes, lesson.topic, lesson.title, nextTitle),
+        content: cardUser(rawNotes, lesson.topic, lesson.title, nextTitle, usedScenes),
       },
     ],
     { maxTokens: CARD_MAX_TOKENS, temperature: 0.45 },
@@ -213,10 +215,28 @@ async function fillLesson(pathwayId: string, lessonIndex: number) {
   await savePathway(pathway);
 
   try {
+    /* Which figures this pathway has already spent, so a five-card run does
+       not open every card on the same scene. Read before the new card lands,
+       so it never counts itself. */
+    const usedScenes = Array.from(
+      new Set(
+        pathway.nodes
+          .filter((node) => node.kind === "card" && node.lessonIndex !== lessonIndex)
+          .flatMap((node) => (node.card?.sections ?? []).map((section) => section))
+          .filter(
+            (section): section is Extract<CardSection, { kind: "figure" }> =>
+              section.kind === "figure",
+          )
+          .map((section) => section.visual.scene)
+          .filter((scene): scene is string => typeof scene === "string" && scene.length > 0),
+      ),
+    );
+
     const generated = await generateCard(
       pathway.rawNotes,
       lesson,
       pathway.outline.lessons[lessonIndex + 1]?.title,
+      usedScenes,
     );
     const latest = await getPathway(pathwayId);
     const live = latest ?? pathway;

@@ -282,10 +282,12 @@ async function fillLesson(pathwayId: string, lessonIndex: number) {
   try {
     let generated = await generateCard(pathway.rawNotes, lesson);
 
-    /* Errors, never content: run the card headless, drag everything
-       draggable, check the math parsed and the page wasn't truncated.
-       One burn of the ladder on failure — verification failure re-enters
-       generation, because a card that throws is a card that cannot ship. */
+    /* Mechanical verification runs only where a Chromium binary exists.
+       Vercel's Node runtime has none and cannot install one, so requiring
+       it there would fail every card and burn the ladder to the 300s wall.
+       Where it is available it still guards the failure class it was built
+       for; where it is not, the card ships as generated. verifyCard's own
+       availability check decides, so this stays a single code path. */
     const verdict = await verifyCard(generated);
     if (!verdict.ok) {
       console.warn(

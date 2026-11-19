@@ -37,7 +37,12 @@ export type CardVerdict =
 
 
 
-async function findChromium(): Promise<string> {
+/* Returns null when no browser exists. Vercel's runtime has no Chromium and
+   cannot install one, so absence is a supported deployment state, not an
+   error: the mechanical checks are skipped and the card ships as generated.
+   It still guards every host that does have a binary (local dev, Docker,
+   fly.io). */
+async function findChromium(): Promise<string | null> {
   const candidates = [
     process.env.CHROMIUM_PATH,
     "/usr/bin/chromium",
@@ -57,7 +62,7 @@ async function findChromium(): Promise<string> {
       /* try next */
     }
   }
-  throw new Error("No Chromium executable found for card verification.");
+  return null;
 }
 
 /* The page-side error collector. Declaration-merged onto Window from the
@@ -91,6 +96,15 @@ export async function verifyCard(card: HtmlCard): Promise<CardVerdict> {
   const doc = buildCardDocument(card.html, { assets: false, heightReporter: false });
 
   const executablePath = await findChromium();
+  if (!executablePath) {
+    /* No browser on this host (Vercel): behavioural checks are impossible.
+       Static checks above still ran; report pass so the card is not
+       re-rolled forever for a missing binary. */
+    console.warn(
+      "[clickpoint] verification skipped: no Chromium on this host (set CHROMIUM_PATH to enable).",
+    );
+    return { ok: true };
+  }
 
   const browser = await puppeteer.launch({
     executablePath,

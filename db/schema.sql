@@ -29,7 +29,11 @@ create table if not exists pathways (
   -- work on serverless (every invocation is a fresh process).
   filling_until timestamptz,
   -- The whole PathwayRecord. The extracted columns above exist only so the
-  -- library list can be built without parsing every blob.
+  -- library list can be built without parsing every blob. Card nodes carry
+  -- HtmlCard: { title, reveal: { misconception, knob }, accent, html } —
+  -- the model's complete body fragment, stored opaque (rendered verbatim
+  -- in a sandboxed iframe; verified headless before it ships). Older rows
+  -- holding CardSpec-era shapes are not migrated: they stop rendering.
   data jsonb not null
 );
 

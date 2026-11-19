@@ -23,6 +23,9 @@ process, so an in-memory guard can never dedupe across them.
 | `LOGFARE_BASE_URL` | Defaults to `https://logfare.ai/v1`. |
 | `LOGFARE_MODEL` | Defaults to `deepseek-v4.1-flash-1017`. |
 | `LOGFARE_REASONING_EFFORT` | Defaults to the model's own. The default model reasons optionally and defaults to `high`; the deployment pins `low`. |
+| `LOGFARE_VISUAL_MODEL` | Draws the simulation. Falls back to `LOGFARE_MODEL`. |
+| `LOGFARE_LESSON_MODEL` | Writes the formalization and worked examples. Falls back to `LOGFARE_MODEL`. |
+| `LOGFARE_REVIEW_MODEL` | Reviews the finished card against its own simulation and the notes, and patches what is wrong. Falls back to `LOGFARE_MODEL`. Keep this one short-prompt: it is sent a ~10k-character digest, because past roughly that size the gateway answers 200 with an empty body. |
 
 `DATABASE_URL` must be the **pooler** connection string, not the direct one.
 Each serverless invocation opens its own connection, so the direct port (5432)
@@ -133,15 +136,17 @@ the `pathways` table for a new row rather than assuming a failure.
 
 ### Quota check
 
-Once three pathways have been started inside the rolling 24h window, the next
-`POST` from that account returns:
+`PATHWAYS_PER_DAY` (in `src/lib/constants.ts`) is set to **10,000**, so the gate
+is effectively open: an account can start as many pathways as it likes while the
+counting machinery stays intact for a future re-tightening. If the cap is ever
+lowered again, the blocked response looks like:
 
 ```sh
 curl -s -w '\nHTTP %{http_code}\n' -X POST https://clickpoint.fly.dev/api/pathways \
   -H 'Content-Type: application/json' \
   -H 'cookie: clickpoint_session=...' \
   --data-binary '{"notes":"..."}'
-# {"error":"You've built 3 of 3 pathways today. The next one opens in 23h 56m.","retryAt":"..."}
+# {"error":"The next pathway opens in 23h 56m.","retryAt":"..."}
 # HTTP 429
 ```
 
@@ -240,11 +245,9 @@ quota working.
 ## Verified working (2026-11-13, local + Supabase)
 
 - `npx next build` clean; `tsc --noEmit` clean; `vitest run` 92 tests green.
-- Quota from `pathway_starts` rows: three starts → `429` with
-  `"You've built 3 of 3 pathways today... next one opens in 23h 57m."`, and
-  `/new` renders the locked panel with the same countdown. Deleting one start
-  row flips `/new` back to the form with "1 of 3 left today" — the boundary is
-  per row, not per clock day.
+- Quota counts `pathway_starts` rows, per row rather than per clock day. The cap
+  is 10,000 (effectively open); with the old 3-cap the boundary was verified at
+  3 rows → `429` and `/new` rendered the locked countdown.
 - Multi-file upload: two `.txt` files plus pasted notes produced one pathway
   whose `rawNotes` contains the pasted text first, then both files in order, and
   exactly one `pathway_starts` row was appended.

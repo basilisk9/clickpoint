@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
 import { UploadForm } from "@/components/UploadForm";
 import { getSessionUser } from "@/lib/auth";
-import { MAX_NOTES_CHARS, MAX_UPLOAD_FILES, PATHWAYS_PER_DAY } from "@/lib/constants";
+import { MAX_NOTES_CHARS, MAX_UPLOAD_FILES } from "@/lib/constants";
 import { getOrCreateGuest } from "@/lib/guest";
 import { quotaGate } from "@/lib/progress";
 import { listPathwayStarts } from "@/lib/store";
@@ -25,9 +25,7 @@ export default async function NewPathwayPage() {
   if (!account) redirect("/signin?next=/new");
 
   const guest = await getOrCreateGuest().catch(() => null);
-  const starts = guest
-    ? await listPathwayStarts(guest.id, PATHWAYS_PER_DAY).catch(() => [])
-    : [];
+  const starts = guest ? await listPathwayStarts(guest.id, 1_000).catch(() => []) : [];
   const gate = quotaGate(starts);
 
   return (
@@ -65,9 +63,7 @@ export default async function NewPathwayPage() {
             </dd>
           </div>
           <div>
-            <dt className="text-sm font-bold text-[#10231f]">
-              {PATHWAYS_PER_DAY} pathways a day
-            </dt>
+            <dt className="text-sm font-bold text-[#10231f]">Unlimited pathways</dt>
             <dd className="mt-1 text-[15px] leading-7 text-[#5d726c]">
               Notes up to {(MAX_NOTES_CHARS / 1000).toFixed(0)}k characters per pathway.
             </dd>

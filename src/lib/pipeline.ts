@@ -1,4 +1,4 @@
-﻿import { FINISH_LESSON_XP, MAX_LESSONS, MIN_LESSONS, QUESTIONS_PER_QUIZ } from "./constants";
+﻿import { FINISH_LESSON_XP, MAX_LESSONS, MIN_LESSONS } from "./constants";
 import { chatJson } from "./ai";
 import { createId } from "./ids";
 import {
@@ -12,10 +12,8 @@ import {
   quizUser,
 } from "./prompts";
 import { after } from "next/server";
-/* Card normalization lives in card.ts: the renderer needs the same code, so it
-   stays free of server-only imports. */
-import { normalizeCardSpec } from "./card";
 import { sanitizeBannerSvg } from "./sanitize";
+import { verifyCard } from "./verifyCard";
 import {
   claimFilling,
   getPathway,
@@ -24,9 +22,10 @@ import {
   savePathway,
 } from "./store";
 import type {
-  CardSection,
-  CardSpec,
+  CardAccent,
+  CardReveal,
   GuestRecord,
+  HtmlCard,
   LessonPlan,
   PathwayBanner,
   PathwayNode,
@@ -52,10 +51,31 @@ function asStringList(value: unknown, fallback: string[]) {
 }
 
 /* How long a regenerate request waits for the background fill to release the
-   pathway lease before giving up. A lesson fill takes 30-60s, so this queues
-   behind one lesson and still answers inside the route's 300s ceiling. */
+   pathway lease before giving up. A one-shot card takes 30-120s plus
+   verification, so this queues behind one lesson and still answers inside
+   the route's 300s ceiling. */
 const REGENERATE_WAIT_MS = 150_000;
 const REGENERATE_POLL_MS = 2_000;
+
+const ACCENTS: CardAccent[] = ["pine", "blood", "cobalt", "ember", "gold"];
+
+/* Exported for the envelope tests: the coercion rules at the boundary
+   between "the model answered" and "a card exists" are contract, not
+   implementation detail. */
+export function asAccent(value: unknown): CardAccent {
+  return ACCENTS.includes(value as CardAccent) ? (value as CardAccent) : "pine";
+}
+
+export function asReveal(value: unknown): CardReveal {
+  const raw = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  /* reveal is the alignment artifact, not learner content: an empty one
+     still parses, so a card that skipped the declaration ships with an
+     honest "not declared" marker rather than a fabricated one. */
+  return {
+    misconception: asString(raw.misconception, "Not declared."),
+    knob: asString(raw.knob, "Not declared."),
+  };
+}
 
 function normalizeOutline(raw: PathwayOutline, notesLength: number): PathwayOutline {
   const lessonsIn = Array.isArray(raw.lessons) ? raw.lessons : [];
@@ -92,7 +112,7 @@ function normalizeBanner(raw: PathwayBanner, outline: PathwayOutline): PathwayBa
   const stats = asStringList(raw.stats, [
     `${outline.lessons.length} cards`,
     `${outline.lessons.length} checkpoints`,
-    `${outline.lessons.length * QUESTIONS_PER_QUIZ} questions`,
+    `${outline.lessons.length * 8} questions`,
     outline.sourceTag,
   ]);
   return {
@@ -133,7 +153,7 @@ function normalizeQuiz(raw: QuizPayload): QuizPayload {
   const questions: QuizQuestion[] = [];
   const incoming = Array.isArray(raw.questions) ? raw.questions : [];
   incoming.forEach((item, index) => {
-    if (questions.length >= QUESTIONS_PER_QUIZ) return;
+    if (questions.length >= 8) return;
     if (item.type === "mcq" && Array.isArray(item.choices) && item.choices.length >= 2) {
       questions.push({
         id: asString(item.id, `q${index + 1}`),
@@ -163,46 +183,91 @@ function normalizeQuiz(raw: QuizPayload): QuizPayload {
   return { questions };
 }
 
-// max_tokens is a CAP, not a target: raising it costs nothing when the model
-// stops early, and is the only thing that saves us when a reasoning model
-// spends several thousand hidden tokens before writing any visible output.
-// Raised to 24000 when cards became section-based: a card that carries a
-// figure, a dictionary, a derivation and five examples is genuinely bigger
-// than the old fixed six-region skeleton.
-const CARD_MAX_TOKENS = 24000;
-// 9000 truncated quizzes when the model wrote more than five questions before
-const QUIZ_MAX_TOKENS = 12000;
+/* ------------------------------------------------------------------ */
+/* The card — one shot.                                                */
+/*                                                                     */
+/* One call. Full raw notes + assigned topic + the system prompt that   */
+/* carries vision, ground truth, the reveal declaration, and the render */
+/* contract. The model returns an envelope: its declared reveal plus   */
+/* the card as a complete HTML body fragment (its own <style>, markup,  */
+/* its own <script>). No section schema, no pass split, no knob rules,  */
+/* no line caps, no word budgets.                                       */
+/*                                                                     */
+/* What replaced all of that:                                          */
+/*   - the macro CSS the card composes against (cardCss.ts, injected    */
+/*     ahead of the model's styles by the iframe host);                 */
+/*   - verification that judges ERRORS only (does the card run), never  */
+/*     content, with one auto-retry before the ladder re-enters.        */
+/*                                                                     */
+/* 40k is a CAP, not a target: a full card is ~19-30k chars of HTML +   */
+/* CSS + JS, and a model that finishes early costs nothing.             */
+/*                                                                     */
+/* chatJson's own retry ladder (chat()) handles the rest: backoff on     */
+/* 429/5xx, model-chain rotation, token-raise on length cuts, token-    */
+/* shrink on gateway time-walls, forever — the user only ever sees       */
+/* "generating" until a real card exists.                               */
+/* ------------------------------------------------------------------ */
+
+const CARD_MAX_TOKENS = 40000;
+const QUIZ_MAX_TOKENS = 16000;
 
 async function generateCard(
   rawNotes: string,
   lesson: LessonPlan,
-  nextTitle?: string,
-  usedScenes: string[] = [],
-): Promise<CardSpec> {
-  const raw = await chatJson<CardSpec>(
+): Promise<HtmlCard> {
+  const raw = await chatJson<Record<string, unknown>>(
     [
       { role: "system", content: CARD_SYSTEM },
-      {
-        role: "user",
-        content: cardUser(rawNotes, lesson.topic, lesson.title, nextTitle, usedScenes),
-      },
+      { role: "user", content: cardUser(rawNotes, lesson.topic, lesson.title) },
     ],
     { maxTokens: CARD_MAX_TOKENS, temperature: 0.45 },
   );
-  return normalizeCardSpec(raw, lesson);
+
+  const html = asString(raw.html);
+  if (!html || html.length < 400) {
+    throw new Error("Card HTML was missing or too short to be real.");
+  }
+  /* A document shell means the model ignored the fragment contract;
+     strip it rather than ship nested documents into the iframe. */
+  const body =
+    html.replace(/<(!doctype|html|head|body)\b[^>]*>/gi, "").replace(/<\/(html|head|body)>/gi, "");
+
+  return {
+    title: asString(raw.title, lesson.title),
+    reveal: asReveal(raw.reveal),
+    accent: asAccent(raw.accent),
+    html: body.trim(),
+  };
 }
 
-async function generateQuiz(rawNotes: string, lesson: LessonPlan) {
+async function generateQuiz(
+  rawNotes: string,
+  lesson: LessonPlan,
+  card: HtmlCard,
+): Promise<QuizPayload> {
+  /* The quiz reads the finished card — its HTML and its declared reveal —
+     so the checkpoint tests what the learner actually just saw, not the
+     topic in the abstract. At least one question is required to probe
+     the card's own click (see QUIZ_SYSTEM). */
   const raw = await chatJson<QuizPayload>(
     [
       { role: "system", content: QUIZ_SYSTEM },
-      { role: "user", content: quizUser(rawNotes, lesson.topic, lesson.title) },
+      {
+        role: "user",
+        content: quizUser(rawNotes, lesson.topic, lesson.title, card.html, card.reveal),
+      },
     ],
     { maxTokens: QUIZ_MAX_TOKENS, temperature: 0.35 },
   );
   return normalizeQuiz(raw);
 }
 
+/* One lesson = one card call, one verify, one quiz call. This used to be
+   a four-pass chain (spine → visual → lesson → review) whose seams were
+   where the worst failures lived: two writers that never saw each other,
+   reviewed by a third that could only patch. Now the whole card is one
+   artifact from one context, and the only judge between it and the
+   learner is the error-checker. */
 async function fillLesson(pathwayId: string, lessonIndex: number) {
   const pathway = await getPathway(pathwayId);
   if (!pathway) return;
@@ -215,29 +280,24 @@ async function fillLesson(pathwayId: string, lessonIndex: number) {
   await savePathway(pathway);
 
   try {
-    /* Which figures this pathway has already spent, so a five-card run does
-       not open every card on the same scene. Read before the new card lands,
-       so it never counts itself. */
-    const usedScenes = Array.from(
-      new Set(
-        pathway.nodes
-          .filter((node) => node.kind === "card" && node.lessonIndex !== lessonIndex)
-          .flatMap((node) => (node.card?.sections ?? []).map((section) => section))
-          .filter(
-            (section): section is Extract<CardSection, { kind: "figure" }> =>
-              section.kind === "figure",
-          )
-          .map((section) => section.visual.scene)
-          .filter((scene): scene is string => typeof scene === "string" && scene.length > 0),
-      ),
-    );
+    let generated = await generateCard(pathway.rawNotes, lesson);
 
-    const generated = await generateCard(
-      pathway.rawNotes,
-      lesson,
-      pathway.outline.lessons[lessonIndex + 1]?.title,
-      usedScenes,
-    );
+    /* Errors, never content: run the card headless, drag everything
+       draggable, check the math parsed and the page wasn't truncated.
+       One burn of the ladder on failure — verification failure re-enters
+       generation, because a card that throws is a card that cannot ship. */
+    const verdict = await verifyCard(generated);
+    if (!verdict.ok) {
+      console.warn(
+        `[clickpoint] card "${lesson.title}" failed verification: ${verdict.reason}. Regenerating once.`,
+      );
+      generated = await generateCard(pathway.rawNotes, lesson);
+      const retry = await verifyCard(generated);
+      if (!retry.ok) {
+        throw new Error(`Card failed verification twice: ${retry.reason}`);
+      }
+    }
+
     const latest = await getPathway(pathwayId);
     const live = latest ?? pathway;
     const liveCard = live.nodes.find((node) => node.id === card.id) ?? card;
@@ -259,7 +319,7 @@ async function fillLesson(pathwayId: string, lessonIndex: number) {
 
     liveQuiz.status = liveQuiz.quiz ? liveQuiz.status : "generating";
     await savePathway(live);
-    liveQuiz.quiz = await generateQuiz(live.rawNotes, lesson);
+    liveQuiz.quiz = await generateQuiz(live.rawNotes, lesson, generated);
     const afterQuiz = (await getPathway(pathwayId)) ?? live;
     const savedQuiz = afterQuiz.nodes.find((node) => node.id === quiz.id) ?? liveQuiz;
     const savedCard = afterQuiz.nodes.find((node) => node.id === card.id) ?? liveCard;
@@ -421,7 +481,9 @@ export async function regenerateNode(pathway: PathwayRecord, nodeId: string) {
   let claimed = await claimFilling(pathway.id);
   let waited = 0;
   while (!claimed && waited < REGENERATE_WAIT_MS) {
-    await new Promise((resolve) => setTimeout(resolve, REGENERATE_POLL_MS));
+    const { promise: pollTick, resolve: pollDone } = Promise.withResolvers<void>();
+    setTimeout(pollDone, REGENERATE_POLL_MS);
+    await pollTick;
     waited += REGENERATE_POLL_MS;
     claimed = await claimFilling(pathway.id);
   }
@@ -465,6 +527,6 @@ export function unlockNextCard(pathway: PathwayRecord, quizNodeId: string) {
   const next = pathway.nodes.find(
     (item) => item.kind === "card" && item.lessonIndex === quiz.lessonIndex + 1,
   );
-  if (next && (next.card || next.html)) next.status = "available";
+  if (next && next.card) next.status = "available";
   return pathway;
 }

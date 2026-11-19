@@ -21,10 +21,12 @@ export const QUIZ_LIVES = 3;
 
 /* Quota: this many new pathways per guest per rolling window. Each pathway
    fires an outline, a banner, and a card + quiz per lesson, so this is the
-   knob that caps LLM spend. Every headline number on the landing page and in
-   the gate copy is derived from these two, so a rule change cannot leave stale
-   copy behind. */
-export const PATHWAYS_PER_DAY = 3;
+   knob that caps LLM spend. Set high enough that the gate is effectively
+   open while the machinery stays in place; drop it later if budget bites.
+
+   Every headline number on the landing page and in the gate copy is derived
+   from these two, so a rule change cannot leave stale copy behind. */
+export const PATHWAYS_PER_DAY = 10_000;
 export const QUOTA_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /* Ceiling on the notes one pathway may be built from. The notes are re-sent to

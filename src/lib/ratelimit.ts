@@ -50,6 +50,7 @@ export function formatWait(ms: number): string {
 export function quotaFrom(
   starts: readonly string[] | null | undefined,
   now: number = Date.now(),
+  limit: number = PATHWAYS_PER_DAY,
 ): QuotaState {
   const cutoff = now - QUOTA_WINDOW_MS;
   const inside = (starts ?? [])
@@ -60,7 +61,7 @@ export function quotaFrom(
   const used = inside.length;
   return {
     used,
-    remaining: Math.max(0, PATHWAYS_PER_DAY - used),
+    remaining: Math.max(0, limit - used),
     nextAt: used > 0 ? new Date(inside[0] + QUOTA_WINDOW_MS).toISOString() : null,
   };
 }
@@ -68,19 +69,16 @@ export function quotaFrom(
 export function checkPathwayQuota(
   starts: readonly string[] | null | undefined,
   now: number = Date.now(),
+  limit: number = PATHWAYS_PER_DAY,
 ): QuotaCheck {
-  const state = quotaFrom(starts, now);
+  const state = quotaFrom(starts, now, limit);
   if (state.remaining > 0) return { allowed: true, ...state };
 
-  /* `used === PATHWAYS_PER_DAY` implies a non-empty window, so nextAt is set;
-     the fallback only exists so the type cannot lie. */
   const retryAt = state.nextAt ?? new Date(now + QUOTA_WINDOW_MS).toISOString();
   return {
     allowed: false,
     ...state,
     retryAt,
-    message: `You've built ${state.used} of ${PATHWAYS_PER_DAY} pathways today. The next one opens in ${formatWait(
-      Date.parse(retryAt) - now,
-    )}.`,
+    message: `The next pathway opens in ${formatWait(Date.parse(retryAt) - now)}.`,
   };
 }

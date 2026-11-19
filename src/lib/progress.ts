@@ -60,24 +60,6 @@ export function summarizeProgress(pathway: PathwayRecord): ProgressSummary {
 }
 
 
-/* "4 of 8 ready · 4 writing" — the sentence the background fill needs.
-   Returns null when there is nothing useful to say, so callers can skip the
-   element entirely instead of rendering an empty pill.
-
-   `ready` is derived from the status buckets rather than by subtracting
-   `generating` from `total`. The naive subtraction counted locked nodes as
-   ready: at the very start of a pathway, card 1 is generating and every other
-   node is locked, so it printed "3 of 4 ready" while the learner could open
-   exactly one. */
-export function describeBackgroundFill(progress: ProgressSummary): string | null {
-  if (progress.total === 0) return null;
-  if (progress.generating === 0) return null;
-
-  const writing = progress.generating === 1 ? "1 still writing" : `${progress.generating} still writing`;
-  const open = progress.ready + progress.completed;
-  return `${open} of ${progress.total} ready · ${writing}`;
-}
-
 /* Which node the learner should open next. Walks in pathway order and takes
    the first node that is neither complete nor locked nor mid-generation. */
 export function nextNode(pathway: PathwayRecord): PathwayNode | null {
@@ -135,7 +117,7 @@ export function firstOpenCard(pathway: PathwayRecord): PathwayNode | null {
         node.kind === "card" &&
         node.status === "available" &&
         !pathway.completedNodeIds.includes(node.id) &&
-        (node.card || node.html),
+        node.card,
     ) ?? null
   );
 }
@@ -165,8 +147,9 @@ export type QuotaGate = {
 export function quotaGate(
   starts: readonly string[] | null | undefined,
   now: number = Date.now(),
+  limit?: number,
 ): QuotaGate {
-  const state = quotaFrom(starts, now);
+  const state = quotaFrom(starts, now, limit);
   const locked = state.remaining === 0;
   return {
     locked,
@@ -177,15 +160,14 @@ export function quotaGate(
   };
 }
 
-/* The wording a finished pathway shows. It never reads "one pathway per day",
-   because that is no longer the rule: three may be built, in any order, and
-   the sentence has to say which of them this was. */
+/* The wording a finished pathway shows. With the quota set effectively open,
+   the normal path is simply "complete". The locked branch is kept for the
+   unlikely case the cap is lowered again. */
 export function describeQuota(gate: QuotaGate): string {
   if (gate.locked && gate.wait) {
     return `Pathway complete. That's all ${PATHWAYS_PER_DAY} for today — next one in ${gate.wait}.`;
   }
-  const left = gate.remaining === 1 ? "1 more pathway" : `${gate.remaining} more pathways`;
-  return `Pathway complete. ${left} today.`;
+  return "Pathway complete.";
 }
 
 /* Which single banner the pathway map shows, if any. Ordering matters: a
@@ -216,8 +198,8 @@ export function bannerState(
     };
   }
 
-  const fill = describeBackgroundFill(progress);
-  if (fill) return { kind: "filling", text: fill };
-
+  /* The background fill runs silently: the learner sees cards appear, not a
+     progress sentence. The first-card and day-done copy above still show,
+     because those are the two moments the wait itself needs an explanation. */
   return { kind: "none" };
 }

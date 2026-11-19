@@ -1,7 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
 import {
   bannerState,
-  describeBackgroundFill,
   describeQuota,
   firstOpenCard,
   focusNodeId,
@@ -11,9 +10,14 @@ import {
   summarizeProgress,
   totalCardCount,
 } from "./progress";
-import { PATHWAYS_PER_DAY, QUOTA_WINDOW_MS } from "./constants";
+import { QUOTA_WINDOW_MS } from "./constants";
 import { formatWait } from "./ratelimit";
 import type { PathwayNode, PathwayRecord } from "./types";
+
+/* The production limit is set high enough to be effectively unlimited.
+   These tests use a small local limit to keep the boundary cases fast
+   and deterministic. */
+const TEST_LIMIT = 3;
 
 /* ------------------------------------------------------------------ */
 /* Fixtures. Deliberately minimal: only the fields the progress code is */
@@ -194,60 +198,6 @@ describe("summarizeProgress", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* describeBackgroundFill                                              */
-/* ------------------------------------------------------------------ */
-
-describe("describeBackgroundFill", () => {
-  /* 4 nodes: 2 complete, 1 generating, 1 locked. Only the 2 finished nodes are
-     readable, so the honest count is 2 — not 3. The old code subtracted
-     `generating` from `total` and counted the locked node as ready. */
-  it("counts completed nodes as ready and never counts locked ones", () => {
-    const summary = summarizeProgress(fourNodePathway());
-    expect(describeBackgroundFill(summary)).toBe("2 of 4 ready · 1 still writing");
-  });
-
-  it("reads correctly when one node is open and one is still writing", () => {
-    const oneCooking = summarizeProgress(
-      pathway({
-        nodes: [
-          node({ id: "c1", status: "available" }),
-          node({ id: "c2", status: "generating" }),
-        ],
-      }),
-    );
-    expect(describeBackgroundFill(oneCooking)).toBe("1 of 2 ready · 1 still writing");
-  });
-
-  it("returns null when nothing is generating, so no empty pill renders", () => {
-    const settled = summarizeProgress(
-      pathway({ nodes: [node({ id: "c1", status: "available" })] }),
-    );
-    expect(describeBackgroundFill(settled)).toBeNull();
-  });
-
-  it("returns null for an empty pathway", () => {
-    expect(describeBackgroundFill(summarizeProgress(pathway()))).toBeNull();
-  });
-
-  /* Regression: at the very start of a pathway card 1 is generating and every
-     other node is locked. The naive subtraction printed "3 of 4 ready" while
-     the learner could open exactly zero nodes. */
-  it("never claims locked nodes are ready at the start of a pathway", () => {
-    const starting = summarizeProgress(
-      pathway({
-        nodes: [
-          node({ id: "c1", status: "generating" }),
-          node({ id: "q1", lessonIndex: 0, status: "locked" }),
-          node({ id: "c2", lessonIndex: 1, status: "locked" }),
-          node({ id: "q2", lessonIndex: 1, status: "locked" }),
-        ],
-      }),
-    );
-    expect(describeBackgroundFill(starting)).toBe("0 of 4 ready · 1 still writing");
-  });
-});
-
-/* ------------------------------------------------------------------ */
 /* nextNode / focusNodeId                                              */
 /* ------------------------------------------------------------------ */
 
@@ -418,10 +368,10 @@ describe("quotaGate", () => {
   const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
   it("unlocks a guest who has never generated", () => {
-    const gate = quotaGate(undefined, NOW);
+    const gate = quotaGate(undefined, NOW, TEST_LIMIT);
     expect(gate.locked).toBe(false);
     expect(gate.used).toBe(0);
-    expect(gate.remaining).toBe(PATHWAYS_PER_DAY);
+    expect(gate.remaining).toBe(TEST_LIMIT);
     expect(gate.retryAt).toBeNull();
     expect(gate.wait).toBeNull();
   });
@@ -433,26 +383,26 @@ describe("quotaGate", () => {
   });
 
   it("stays unlocked below the limit and counts what it used", () => {
-    for (let count = 1; count < PATHWAYS_PER_DAY; count += 1) {
+    for (let count = 1; count < TEST_LIMIT; count += 1) {
       const starts = Array.from({ length: count }, (_, i) => ago((i + 1) * 60_000));
-      const gate = quotaGate(starts, NOW);
+      const gate = quotaGate(starts, NOW, TEST_LIMIT);
       expect(gate.locked).toBe(false);
       expect(gate.used).toBe(count);
-      expect(gate.remaining).toBe(PATHWAYS_PER_DAY - count);
+      expect(gate.remaining).toBe(TEST_LIMIT - count);
       expect(gate.retryAt).toBeNull();
     }
   });
 
   it("locks exactly at the limit and reports when the oldest slot frees", () => {
-    const starts = Array.from({ length: PATHWAYS_PER_DAY }, (_, i) =>
+    const starts = Array.from({ length: TEST_LIMIT }, (_, i) =>
       ago((i + 1) * 60_000),
     );
-    const gate = quotaGate(starts, NOW);
+    const gate = quotaGate(starts, NOW, TEST_LIMIT);
     expect(gate.locked).toBe(true);
-    expect(gate.used).toBe(PATHWAYS_PER_DAY);
+    expect(gate.used).toBe(TEST_LIMIT);
     expect(gate.remaining).toBe(0);
     /* The oldest of the three is the first to age out. */
-    const oldest = NOW - PATHWAYS_PER_DAY * 60_000;
+    const oldest = NOW - TEST_LIMIT * 60_000;
     expect(gate.retryAt).toBe(new Date(oldest + QUOTA_WINDOW_MS).toISOString());
     expect(gate.wait).toBe("23h 57m");
   });
@@ -465,17 +415,17 @@ describe("quotaGate", () => {
       ago(60_000),
       ago(120_000),
     ];
-    const gate = quotaGate(starts, NOW);
+    const gate = quotaGate(starts, NOW, TEST_LIMIT);
     expect(gate.used).toBe(2);
     expect(gate.locked).toBe(false);
     expect(gate.remaining).toBe(1);
   });
 
   it("still locks at the boundary, one millisecond inside the window", () => {
-    const starts = Array.from({ length: PATHWAYS_PER_DAY }, () =>
+    const starts = Array.from({ length: TEST_LIMIT }, () =>
       ago(QUOTA_WINDOW_MS - 1),
     );
-    expect(quotaGate(starts, NOW).locked).toBe(true);
+    expect(quotaGate(starts, NOW, TEST_LIMIT).locked).toBe(true);
   });
 
   it("counts only what is inside the window, however many rows exist", () => {
@@ -484,9 +434,9 @@ describe("quotaGate", () => {
       ago(QUOTA_WINDOW_MS * 2),
       ago(QUOTA_WINDOW_MS + 5000),
     ];
-    const gate = quotaGate(starts, NOW);
+    const gate = quotaGate(starts, NOW, TEST_LIMIT);
     expect(gate.used).toBe(0);
-    expect(gate.remaining).toBe(PATHWAYS_PER_DAY);
+    expect(gate.remaining).toBe(TEST_LIMIT);
   });
 });
 
@@ -495,32 +445,22 @@ describe("describeQuota", () => {
 
   it("counts down when the window is spent", () => {
     const gate = quotaGate(
-      Array.from({ length: PATHWAYS_PER_DAY }, () => new Date(NOW - 3600_000).toISOString()),
+      Array.from({ length: TEST_LIMIT }, () => new Date(NOW - 3600_000).toISOString()),
       NOW,
+      TEST_LIMIT,
     );
     const text = describeQuota(gate);
     expect(text).toContain("next one in 23h");
-    expect(text).toContain(`${PATHWAYS_PER_DAY} for today`);
+    expect(text).toMatch(/for today/);
   });
 
-  it("names how many are left, singular and plural", () => {
-    const one = describeQuota({
-      locked: false,
-      used: PATHWAYS_PER_DAY - 1,
-      remaining: 1,
-      retryAt: null,
-      wait: null,
-    });
-    expect(one).toBe("Pathway complete. 1 more pathway today.");
-
-    const two = describeQuota({
-      locked: false,
-      used: 1,
-      remaining: 2,
-      retryAt: null,
-      wait: null,
-    });
-    expect(two).toBe("Pathway complete. 2 more pathways today.");
+  it("says complete when the window is not spent", () => {
+    const gate = quotaGate(
+      Array.from({ length: TEST_LIMIT - 1 }, () => new Date(NOW - 3600_000).toISOString()),
+      NOW,
+      TEST_LIMIT,
+    );
+    expect(describeQuota(gate)).toBe("Pathway complete.");
   });
 
   it("never says one pathway per day, which is no longer the rule", () => {
@@ -550,13 +490,6 @@ describe("bannerState", () => {
     expect(state.text).toContain("first card");
   });
 
-  it("shows the live fill counter once something is readable", () => {
-    const state = bannerState(fourNodePathway(), openGate);
-    expect(state.kind).toBe("filling");
-    if (state.kind !== "filling") throw new Error("unreachable");
-    expect(state.text).toBe("2 of 4 ready · 1 still writing");
-  });
-
   it("shows the day-done sentence once every node is finished", () => {
     const p = pathway({
       nodes: [
@@ -568,10 +501,11 @@ describe("bannerState", () => {
     const state = bannerState(
       p,
       quotaGate(
-        Array.from({ length: PATHWAYS_PER_DAY }, (_, i) =>
+        Array.from({ length: TEST_LIMIT }, (_, i) =>
           new Date(NOW - (i + 1) * 3600_000).toISOString(),
         ),
         NOW,
+        TEST_LIMIT,
       ),
     );
     expect(state.kind).toBe("day-done");

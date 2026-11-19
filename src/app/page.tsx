@@ -2,7 +2,6 @@ import Link from "next/link";
 import { PathwayPreview } from "@/components/PathwayPreview";
 import { SiteHeader } from "@/components/SiteHeader";
 import { getSessionUser } from "@/lib/auth";
-import { PATHWAYS_PER_DAY } from "@/lib/constants";
 
 /* ------------------------------------------------------------------ */
 /* The landing page.                                                   */
@@ -77,8 +76,8 @@ export default async function Home() {
                 the click reads as a bait-and-switch. "no credit card", not
                 "no card": this product's unit is a card. */}
             <p className="mt-4 text-sm text-[#5d726c]">
-              Free — {PATHWAYS_PER_DAY} pathways a day, no credit card. The first card
-              takes about a minute.
+              Free — unlimited pathways, no credit card. The first card takes about a
+              minute.
             </p>
           </div>
 

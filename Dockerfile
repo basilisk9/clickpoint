@@ -22,7 +22,12 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Run unprivileged.
-RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+
+# Headless Chromium for card verification (verifyCard.ts): every generated
+# card must actually run — scripts execute, sliders drag, canvases paint —
+# before it ships to a learner. Alpine's chromium needs its runner deps.
+RUN apk add --no-cache chromium nss freetype freetype-dev harfbuzz ca-certificates ttf-freefont
+ENV CHROMIUM_PATH=/usr/bin/chromium-browser
 
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next ./.next

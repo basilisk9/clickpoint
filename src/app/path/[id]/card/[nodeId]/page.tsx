@@ -13,8 +13,13 @@ export default async function CardPage({
   if (!guest) notFound();
   const pathway = await getPathway(id);
   if (!pathway || pathway.guestId !== guest.id) notFound();
-  const node = pathway.nodes.find((item) => item.id === nodeId);
-  if (!node || node.kind !== "card" || node.status === "locked" || !(node.card || node.html))
+  /* Read the node from the PUBLIC copy, not the raw record: publicPathway is
+     where a saved simulation's readouts are corrected against its own JS, and
+     passing the raw node here would render the card this page just repaired
+     the pathway around. */
+  const view = publicPathway(pathway);
+  const node = view.nodes.find((item) => item.id === nodeId);
+  if (!node || node.kind !== "card" || node.status === "locked" || !node.card)
     notFound();
-  return <CardFrame pathway={publicPathway(pathway)} node={node} />;
+  return <CardFrame pathway={view} node={node} />;
 }

@@ -2,6 +2,7 @@
 
 import katex from "katex";
 import { useMemo } from "react";
+import { cn } from "@/lib/cn";
 
 /* KaTeX rendered at the React layer, not by the model. A card supplies the
    LaTeX string; this component guarantees it renders correctly every time.
@@ -44,15 +45,16 @@ export function Tex({
     [children, block],
   );
 
-  if (block) {
-    return (
-      <div
-        className={className}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    );
-  }
+  /* One element for both modes. Rich() is called inside <p>, <td> and <span>
+     — every prose field in the card — so a block-level <div> here is invalid
+     HTML: the browser closes the paragraph before it, React hydrates a tree
+     the browser never built, and the page throws a hydration error. KaTeX's
+     own display wrapper is a block-level <span>, so display mode is expressed
+     in CSS and the markup stays legal in every caller. */
   return (
-    <span className={className} dangerouslySetInnerHTML={{ __html: html }} />
+    <span
+      className={cn(block && "block overflow-x-auto", className)}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }

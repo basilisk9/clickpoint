@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
-import { MAX_UPLOAD_FILES, PATHWAYS_PER_DAY } from "@/lib/constants";
+import { MAX_UPLOAD_FILES } from "@/lib/constants";
 import { stageProgress, stageStates } from "@/lib/uploadStages";
 
 /* ------------------------------------------------------------------ */
@@ -122,9 +122,7 @@ export function UploadForm({
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#0f766e]">
           today&apos;s pathways
         </p>
-        <h2 className="mt-3 text-3xl font-semibold leading-tight">
-          That&apos;s {PATHWAYS_PER_DAY} of {PATHWAYS_PER_DAY} built.
-        </h2>
+        <h2 className="mt-3 text-3xl font-semibold leading-tight">That&apos;s the daily limit.</h2>
         <p className="mt-4 text-[16px] leading-7 text-[#5d726c]">
           The next slot opens in{" "}
           <span className="font-bold text-[#10231f]">{waitLabel(until, now)}</span>.
@@ -147,7 +145,7 @@ export function UploadForm({
         <label className="block text-sm font-semibold uppercase tracking-wide text-[#5d726c]">
           Paste notes
         </label>
-        <span className="chip">{PATHWAYS_PER_DAY - used} of {PATHWAYS_PER_DAY} left today</span>
+        <span className="chip">Free</span>
       </div>
       <textarea
         name="notes"

@@ -21,11 +21,21 @@ const REQUEST_TIMEOUT_MS = 240_000;
 // guarantees the next attempt dies the same way, so we ask for less instead.
 const GATEWAY_CUTOFF_MS = 100_000;
 // Appended to the prompt when a previous attempt was cut off for length.
+//
+// This used to say "one visual, no more than 2 worked examples, under ~2500
+// tokens", which silently gutted every card slow enough to trip the cutoff:
+// the model obeyed, and the product shipped 450-word cards that taught nothing.
+// The fix is to preserve the CARD's structure and cut only the fat — the
+// reference spine (visual, invariant, ledger, moves, trick, checks, scope,
+// 4-example ramp) must survive a retry, or the retry is worthless.
 const BREVITY_DIRECTIVE =
-  "The previous attempt was cut off for length, so keep this regeneration tight: " +
-  "one visual, a compact formalization, no more than 2 worked examples, and keep " +
-  "the visible answer under ~2500 tokens. A valid, complete JSON document matters " +
-  "more than length.";
+  "The previous attempt was cut off for length. Regenerate so the JSON closes " +
+  "cleanly, but keep the card's required structure: one interactive visual " +
+  "(shorten the JS, not the pedagogy — no animation loop if a redraw-on-input " +
+  "will do), the invariant, the ledger, the moves, the trick, the endpoint " +
+  "checks, the scope, and all 4-5 worked examples. Trim adjectives, restated " +
+  "lines, and optional asides — never a section, never an example, never the " +
+  "exam numbers. A complete, parseable JSON document matters most.";
 
 function briefedMessages(messages: ChatMessage[]): ChatMessage[] {
   if (messages.length === 0) return messages;
@@ -45,6 +55,26 @@ type ChatMessage = {
 type ChatOptions = {
   temperature?: number;
   maxTokens?: number;
+  /* A card must not be "shrunk" on retry: its length IS the product. Set this
+     and a gateway cutoff re-asks the SAME structure with a shorter JS bundle
+     instead of collapsing to two examples. */
+  keepStructure?: boolean;
+  /* Route this call to a specific model instead of the default one. The visual
+     pass uses a different model from the content pass: the two jobs want
+     different strengths, and a single model writing both writes prose about a
+     picture it has not committed to yet. */
+  model?: string;
+  /* Per-call reasoning effort. The default model reasons optionally and the
+     deployment's default effort is "high"; on a drawing pass that hidden
+     thinking can consume the whole budget and return nothing at all, so the
+     visual call pins this to "none". */
+  reasoningEffort?: string;
+  /* Bound the retry loop. It is unbounded by design for content, where any
+     answer is worth waiting for, but the provider returns an empty body on a
+     nondeterministic fraction of visual requests — retrying that forever turns
+     a flaky drawing into a ten-minute stall. A visual that cannot be drawn is
+     optional; the card is not. */
+  maxAttempts?: number;
 };
 
 type ContentPart = { text?: unknown };
@@ -53,7 +83,10 @@ type LogfareResponse = {
   model?: string;
   choices?: Array<{
     finish_reason?: string | null;
-    message?: { content?: unknown };
+    /* `reasoning_content` is hidden thinking, never the reply. Documented
+       here because it is present on the wire and must not be mistaken for
+       an answer when `content` is empty. */
+    message?: { content?: unknown; reasoning_content?: unknown };
   }>;
 };
 
@@ -394,6 +427,12 @@ async function performRequest(
     }
 
     const data = (await response.json()) as LogfareResponse;
+    /* Only the answer field. `reasoning_content` is the model THINKING, not
+       its reply — measured on kimi-k2.7-code and glm, where it holds "We
+       need act as correctness reviewer…" and no JSON at all. Feeding that to
+       a JSON parser turns one failed call into four doubled parse retries,
+       per section, per card. An empty answer stays empty, and the fallback
+       chain handles it. */
     const content = normalizeContent(data.choices?.[0]?.message?.content);
     // With `logfare/auto` the router picks the model, so report what served us.
     const servedBy = data.model ?? model;
@@ -460,7 +499,20 @@ async function callModel(
 
 export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
   const config = getConfig();
-  const chain = [config.model, ...config.fallbacks];
+  /* A per-call effort wins over the deployment default. "none" is real: the
+     provider advertises it, and it is the difference between a visual that
+     arrives in 18s and one that burns the budget reasoning and returns "". */
+  if (options.reasoningEffort !== undefined) {
+    config.reasoningEffort = options.reasoningEffort;
+  }
+  /* An explicit model leads the chain; the configured default remains the
+     fallback so a bad model name degrades instead of failing the card. */
+  const primary = options.model || config.model;
+  const chain = [
+    primary,
+    ...config.fallbacks.filter((name) => name !== primary),
+    ...(primary === config.model ? [] : [config.model]),
+  ];
 
   // Tokens actually wanted. It starts at the caller's budget, grows when a
   // failure looks like truncation, and shrinks when a failure looks like a
@@ -476,11 +528,17 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
   // when the current model's own request fails, so we round-robin the chain.
   let attempt = 0;
   let modelIndex = 0;
+  let lastErrorMessage = "no attempt made";
 
   // Forever is intentional: the call does not resolve until it succeeds or
   // hits a non-retryable error. That is what "retry until it doesn't fail"
   // means. The runtime bound is the surrounding request timeout, not this loop.
   for (;;) {
+    if (options.maxAttempts && attempt >= options.maxAttempts) {
+      throw new Error(
+        `Gave up after ${attempt} attempts: ${lastErrorMessage}`,
+      );
+    }
     const model = chain[modelIndex % chain.length];
 
     const attemptOptions: ChatOptions = {
@@ -490,10 +548,14 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
       // it guarantees an empty answer. The brevity nudge below is the real
       // lever on a retry, since a smaller task needs less thinking.
       maxTokens: shrink
-        ? Math.max(
-            options.maxTokens ?? 2000,
-            Math.floor(wantedTokens / 2),
-          )
+        ? options.keepStructure
+          /* Same envelope, same room to close the JSON: only the prose gets
+             tighter, never the budget, or the retry truncates again. */
+          ? options.maxTokens ?? wantedTokens
+          : Math.max(
+              options.maxTokens ?? 2000,
+              Math.floor(wantedTokens / 2),
+            )
         : Math.min(wantedTokens, MAX_TOKEN_CEILING),
     };
     const attemptMessages = shrink ? briefedMessages(messages) : messages;
@@ -514,6 +576,7 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
       return result.content;
     }
 
+    lastErrorMessage = result.error;
     // A 401/403/404 will not fix itself by retrying or switching models, so
     // this is the only way out of the loop other than success.
     if (!result.retryable) {
@@ -528,12 +591,19 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
       // the model to be tight; do not inflate the retry.
       shrink = true;
       wantedTokens = attemptOptions.maxTokens ?? wantedTokens;
+    } else if (/returned no text.*finish_reason: length/i.test(result.error)) {
+      /* Budget spent with NOTHING visible. This is the reasoning-eats-the-
+         envelope failure, not a too-small answer: a longer envelope gives the
+         hidden thinking more room to do the same thing again. Ask for less so
+         the model has to get to the point. */
+      shrink = true;
+      wantedTokens = Math.max(2000, Math.floor(wantedTokens / 2));
     } else if (
       /finish_reason: length|incomplete JSON|returned no text/i.test(
         result.error,
       )
     ) {
-      // The answer itself ran dry. More headroom may genuinely help.
+      // A real answer that ran dry. More headroom may genuinely help.
       shrink = false;
       wantedTokens = Math.min(wantedTokens * 2, MAX_TOKEN_CEILING);
     }

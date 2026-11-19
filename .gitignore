@@ -56,3 +56,7 @@ npm-install.err
 *.log
 *.err
 *-out.txt
+
+# Local scratch
+.revbak/
+.tmp-*

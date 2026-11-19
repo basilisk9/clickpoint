@@ -23,6 +23,33 @@ Open [http://localhost:3000](http://localhost:3000)
 5. Finish lesson → 8-question checkpoint → 75% unlocks the next card
 6. Three pathways per rolling 24h; the gate copy counts down in the app
 
+## Architecture (one shot)
+
+A card is one model call. The pipeline used to be four passes (spine →
+visual → lesson → review); the seams between them were where the worst
+failures lived, so it is now a single call that writes the whole card:
+complete HTML + CSS + JS, composed against the hard-coded macro design
+system in `src/lib/cardCss.ts` and declared in the render contract inside
+`src/lib/prompts.ts` (CARD_SYSTEM).
+
+- The model also declares its **reveal** — the misconception the card
+  breaks and the knob that breaks it — before writing any HTML. The quiz
+  call reads that declaration so the checkpoint tests the click itself.
+- Cards render in a sandboxed iframe (`CardIframe.tsx`) with the host's
+  self-hosted fonts, KaTeX, and macro stylesheet injected ahead of the
+  model's own CSS (wrapped in `@layer ai`, so the macro wins every
+  collision by cascade law — and the iframe wall means the card can never
+  touch the app's own UI).
+- Verification (`verifyCard.ts`) judges **errors only, never content**:
+  the card must execute headless in Chromium — scripts run, sliders drag
+  without throwing, canvases paint, no external requests, no bare LaTeX
+  in prose. A truncated card throws on load and is caught for free; a
+  failing card regenerates through the retry ladder in `ai.ts` (backoff,
+  model-chain rotation, token-raise on length cuts) until one passes.
+- There is no content reviewer anywhere in the pipeline: quality signal
+  comes from the feedback button, and the regenerate button re-rolls a
+  card on demand.
+
 ## Feedback
 
 There is no admin UI and none is needed. Reports land in the `feedback` table

@@ -629,6 +629,15 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
 }
 
 
+/* The reviewer: a different model reads the assembled card and reports
+   what is factually wrong. Separate from the writer for the same reason a
+   code review is separate from authorship — the model that produced a
+   number is the worst judge of it. Falls back to the content model. */
+export function reviewModel(): string | undefined {
+  const name = (process.env.LOGFARE_REVIEW_MODEL || "").trim();
+  return name || undefined;
+}
+
 export async function chatJson<T>(
   messages: ChatMessage[],
   options: ChatOptions = {},

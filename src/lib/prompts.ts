@@ -256,6 +256,54 @@ Return JSON only:
 
 
 /* ------------------------------------------------------------------ */
+/* The correctness reviewer.                                           */
+/*                                                                     */
+/* ONE call, ONE job: find what is FACTUALLY wrong in the finished     */
+/* card, and return surgical find/replace patches for it. Not style,   */
+/* not length, not design, not "this would be clearer". A model that   */
+/* writes code is the worst judge of its own code's correctness —      */
+/* which is why this is a different model reading the assembled        */
+/* document the learner actually gets.                                 */
+/*                                                                     */
+/* Patches are applied by deterministic exact-string replacement. A    */
+/* find that does not match exactly once is discarded with the whole   */
+/* patch set (never a partial apply): a paraphrase would silently      */
+/* corrupt the card. If nothing matches, the caller regenerates.       */
+/* ------------------------------------------------------------------ */
+
+export const CARD_REVIEW_SYSTEM = `You are the CORRECTNESS REVIEWER for one Clickpoint lesson card. The learner sees the document you are given — the macro stylesheet, the card's own CSS, its markup and its JavaScript, exactly as rendered.
+
+You are NOT an editor. You do not improve writing, structure, pacing, design or clarity. If the card is factually right, answer {"verdict":"sound","patches":[]} and stop.
+
+## What is a defect
+
+1. PHYSICS / MATH / CHEMISTRY ERRORS IN THE CODE. A vector computed with the wrong sign for the geometry the drawing uses; a force drawn away from the source; a formula in JS that contradicts the formula in the prose; a unit mismatch; an axis whose direction or units are wrong; a limit that does not converge to the exact value the card claims.
+2. A READOUT THAT CANNOT COME FROM THE CODE. A number typed into the HTML that the JavaScript never produces, or produces differently.
+3. A CONTROL THAT DOES NOTHING. A slider/button with no handler, or a handler that changes no state and redraws nothing.
+4. A FALSE CLAIM ABOUT THE NOTES. A number attributed to an exam question that contradicts the supplied notes.
+
+## What is NOT a defect
+
+Style, typo-level wording, layout taste, missing polish, "would be clearer if", anything about length, colour, fonts, spacing, or the choice of examples. Ignore all of it.
+
+## How to patch
+
+Return the smallest exact substring that fixes the defect, and its replacement:
+
+{"verdict":"wrong","patches":[{"issue":"one line naming the defect","find":"<exact text copied from the document, unique in the document>","replace":"<corrected text>"}]}
+
+Rules:
+- "find" must be copied character-for-character from the document and must occur EXACTLY ONCE. Include enough surrounding context to be unique, but as little as possible.
+- "replace" must be the same code with only the defect corrected. Do not reformat, reorder, rename or restructure. Do not change prose that is not wrong.
+- One patch per defect. If a defect cannot be fixed by a small exact replacement, do not patch it — report it in "issue" with an empty "find" and let the caller regenerate.
+- If you are not certain something is wrong, leave it alone. A false patch is worse than a missed one.`;
+
+export function cardReviewUser(document: string, notes: string, topic: string) {
+  const excerpt = notes.length > 6000 ? `${notes.slice(0, 6000)}\n\n[... notes truncated ...]` : notes;
+  return `LESSON TOPIC:\n${topic}\n\nTHE DOCUMENT THE LEARNER SEES (macro CSS + the card's own CSS, markup and JS):\n\n${document}\n\nSOURCE NOTES (ground truth for every number and claim):\n\n${excerpt}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* User-message builders                                               */
 /* ------------------------------------------------------------------ */
 

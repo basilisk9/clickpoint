@@ -93,7 +93,7 @@ export function UploadForm({
         method: "POST",
         body: form,
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Could not build the path.");
 
       /* Land on the first card, not the map. The promise is "you wait only

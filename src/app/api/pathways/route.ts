@@ -62,7 +62,15 @@ export async function POST(request: Request) {
       if (files.length) chunks.push(await extractNotesFromUploads(files));
       notes = chunks.join("\n\n").trim();
     } else {
-      const body = (await request.json()) as { notes?: string };
+      let body: { notes?: string };
+      try {
+        body = (await request.json()) as { notes?: string };
+      } catch {
+        return NextResponse.json(
+          { error: "Send multipart/form-data or JSON with a notes field." },
+          { status: 400 },
+        );
+      }
       notes = String(body.notes || "").trim();
     }
 

@@ -78,7 +78,7 @@ export function CardFrame({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ nodeId: node.id }),
     });
-    const data = await response.json();
+    const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       setBusy(false);
       alert(data.error || "Could not finish lesson.");

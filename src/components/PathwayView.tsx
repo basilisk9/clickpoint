@@ -48,8 +48,8 @@ export function PathwayView({
     const timer = window.setInterval(async () => {
       const response = await fetch(`/api/pathways/${pathway.id}`, { cache: "no-store" });
       if (!response.ok) return;
-      const data = await response.json();
-      setPathway(data.pathway);
+      const data = await response.json().catch(() => ({}));
+      if (data.pathway) setPathway(data.pathway);
     }, 4000);
     return () => window.clearInterval(timer);
   }, [pathway.id, stillFilling]);

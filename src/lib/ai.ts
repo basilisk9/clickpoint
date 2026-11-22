@@ -1,5 +1,7 @@
 const DEFAULT_BASE = "https://logfare.ai/v1";
-const DEFAULT_MODEL = "deepseek-v4.1-flash-1017";
+// Logfare rotates its catalog; the old deepseek-v4.1-flash-1017 default
+// 404s as of 2026-11-22. Point deployments at a live model explicitly.
+const DEFAULT_MODEL = "qwen-3.8-27b";
 // Per-process cooldown: prefer a healthy backup on subsequent calls, then
 // probe the configured primary again. A cooling model is still a last resort.
 const MODEL_COOLDOWN_MS = 60_000;

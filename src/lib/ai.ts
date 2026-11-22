@@ -2,7 +2,7 @@
 // model slug works here. The LOGFARE_* env var names are historical: their
 // values are a Hack Club key, this base URL, and OpenRouter slugs.
 const DEFAULT_BASE = "https://ai.hackclub.com/proxy/v1";
-const DEFAULT_MODEL = "qwen/qwen3-32b";
+const DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash-1017";
 // Per-process cooldown: prefer a healthy backup on subsequent calls, then
 // probe the configured primary again. A cooling model is still a last resort.
 const MODEL_COOLDOWN_MS = 60_000;

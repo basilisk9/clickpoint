@@ -1,7 +1,8 @@
-const DEFAULT_BASE = "https://logfare.ai/v1";
-// Logfare rotates its catalog; the old deepseek-v4.1-flash-1017 default
-// 404s as of 2026-11-22. Point deployments at a live model explicitly.
-const DEFAULT_MODEL = "qwen-3.8-27b";
+// Hack Club AI (https://ai.hackclub.com) proxies OpenRouter, so any OpenRouter
+// model slug works here. The LOGFARE_* env var names are historical: their
+// values are a Hack Club key, this base URL, and OpenRouter slugs.
+const DEFAULT_BASE = "https://ai.hackclub.com/proxy/v1";
+const DEFAULT_MODEL = "qwen/qwen3-32b";
 // Per-process cooldown: prefer a healthy backup on subsequent calls, then
 // probe the configured primary again. A cooling model is still a last resort.
 const MODEL_COOLDOWN_MS = 60_000;
@@ -17,8 +18,8 @@ const MAX_TOKEN_CEILING = 48_000;
 // ~7000 hidden tokens before writing any card HTML and runs at ~75 tok/s, so
 // a legitimate card can need ~150s. Cutting it off early just wastes it.
 const REQUEST_TIMEOUT_MS = 240_000;
-// Logfare's gateway stops upstream generation at roughly ~120s and answers
-// 503. When a call dies after running that long, asking for more tokens only
+// The gateway stops upstream generation at roughly ~120s and answers 503.
+// When a call dies after running that long, asking for more tokens only
 // guarantees the next attempt dies the same way, so we ask for less instead.
 const GATEWAY_CUTOFF_MS = 100_000;
 // Appended to the prompt when a previous attempt was cut off for length.
@@ -80,7 +81,7 @@ type ChatOptions = {
 
 type ContentPart = { text?: unknown };
 
-type LogfareResponse = {
+type ChatResponse = {
   model?: string;
   choices?: Array<{
     finish_reason?: string | null;
@@ -131,7 +132,9 @@ function failureAction(status: number, detail: string) {
   if (status === 404 || (status === 429 && /limit_source|free.?tier|daily.?limit/i.test(detail))) {
     return "unavailable";
   }
-  if (status === 408 || status === 429 || status >= 500) return "retry";
+  // 402 = the provider's daily spending limit is spent (Hack Club: $3/day,
+  // resets 00:00 UTC). Retrying outlives it instead of failing the build.
+  if (status === 402 || status === 408 || status === 429 || status >= 500) return "retry";
   if (status === 400 || status === 422) {
     if (/model_not_found|unknown model|invalid model|model[^\n]{0,100}(?:not found|unavailable|does not exist)/i.test(detail)) {
       return "unavailable";
@@ -155,7 +158,7 @@ function parseFallbacks(primary: string): string[] {
 function getConfig(): ModelConfig {
   const apiKey = process.env.LOGFARE_API_KEY;
   if (!apiKey) {
-    throw new Error("LOGFARE_API_KEY is missing. Paste your Logfare key into .env.local.");
+    throw new Error("LOGFARE_API_KEY is missing. Paste your Hack Club AI key into .env.local.");
   }
   const model = process.env.LOGFARE_MODEL?.trim() || DEFAULT_MODEL;
   return {
@@ -435,7 +438,7 @@ async function performRequest(
 
     if (!response.ok) {
       const detail = await response.text().catch(() => "");
-      const error = `Logfare ${response.status} on ${model}: ${
+      const error = `Model ${response.status} on ${model}: ${
         detail.slice(0, 300) || response.statusText
       }`;
       if (response.status === 400 || response.status === 422) {
@@ -463,7 +466,7 @@ async function performRequest(
       };
     }
 
-    const data = (await response.json()) as LogfareResponse;
+    const data = (await response.json()) as ChatResponse;
     /* Only the answer field. `reasoning_content` is the model THINKING, not
        its reply — measured on kimi-k2.7-code and glm, where it holds "We
        need act as correctness reviewer…" and no JSON at all. Feeding that to
@@ -471,12 +474,12 @@ async function performRequest(
        per section, per card. An empty answer stays empty, and the fallback
        chain handles it. */
     const content = normalizeContent(data.choices?.[0]?.message?.content);
-    // With `logfare/auto` the router picks the model, so report what served us.
+    // With an auto/router model the gateway picks the model, so report what served us.
     const servedBy = data.model ?? model;
 
     if (!content) {
-      // A 200 carrying no text is how Logfare surfaces an upstream provider
-      // failure, so retry it instead of failing the whole build.
+      // A 200 carrying no text is how the gateway surfaces an upstream
+      // provider failure, so retry it instead of failing the whole build.
       const reason = data.choices?.[0]?.finish_reason;
       const detail =
         reason === "length"
@@ -489,7 +492,7 @@ async function performRequest(
         model,
         status: null,
         action: "retry",
-        error: `Logfare returned no text from ${servedBy}${detail}.`,
+        error: `${servedBy} returned no text${detail}.`,
         elapsedMs: Date.now() - began,
       };
     }
@@ -510,7 +513,7 @@ async function callModel(
     return await withTimeout(
       performRequest(config, model, messages, options, timeoutMs),
       timeoutMs,
-      `Logfare request on ${model}`,
+      `Model request on ${model}`,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -519,7 +522,7 @@ async function callModel(
       model,
       status: null,
       action: "retry",
-      error: `Logfare request failed on ${model}: ${message}`,
+      error: `Model request failed on ${model}: ${message}`,
       elapsedMs: Date.now() - began,
     };
   }

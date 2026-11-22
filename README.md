@@ -5,7 +5,9 @@ Upload notes. Get a Duolingo-style pathway. Learn the card. Survive the checkpoi
 ## Setup
 
 1. Copy `.env.example` to `.env.local`
-2. Put your Logfare key in `LOGFARE_API_KEY` (https://logfare.ai, `lfu_...`)
+2. Put your Hack Club AI key in `LOGFARE_API_KEY` (sign in at https://ai.hackclub.com
+   with Hack Club; the `LOGFARE_*` names are historical, the values are
+   Hack Club / OpenRouter)
 3. Put your Postgres connection string in `DATABASE_URL` — records live in
    Postgres, so the app needs `db/schema.sql` applied once (it is idempotent):
    `psql "$DATABASE_URL" -f db/schema.sql`
@@ -14,9 +16,12 @@ Upload notes. Get a Duolingo-style pathway. Learn the card. Survive the checkpoi
 
 Open [http://localhost:3000](http://localhost:3000)
 
-Set `LOGFARE_MODEL` to your first choice. In `.env.local` or your host's environment,
-set `LOGFARE_FALLBACK_MODELS` to an ordered, comma-separated list of Logfare model
-IDs (for example, `qwen-3.8-27b,glm-5.3`). Leave it empty for no extra models.
+Set `LOGFARE_MODEL` to your first choice (an OpenRouter slug — Hack Club proxies
+all of OpenRouter). In `.env.local` or your host's environment,
+set `LOGFARE_FALLBACK_MODELS` to an ordered, comma-separated list of OpenRouter
+slugs (for example, `deepseek/deepseek-chat,google/gemini-2.5-flash`). Leave it
+empty for no extra models. Hack Club's free plan allows $3 of spend per day,
+resetting at 00:00 UTC.
 A model outage or rate limit advances to the next candidate; subsequent calls on
 the same server instance prefer healthy models for 60 seconds before trying the
 primary again. If a validation error names an invalid or unsupported request option

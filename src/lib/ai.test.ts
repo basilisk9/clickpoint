@@ -35,7 +35,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-describe("Logfare model routing", () => {
+describe("Model routing", () => {
   it("recovers from a temperature 400 on the chosen model without dropping other settings", async () => {
     fetchMock.mockResolvedValueOnce(unsupported("temperature"))
       .mockImplementation(async () => Response.json(answer));

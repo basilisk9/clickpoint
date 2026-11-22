@@ -15,10 +15,10 @@ primary_region = 'ams'
 
 [env]
   HOSTNAME = '0.0.0.0'
-  LOGFARE_BASE_URL = 'https://logfare.ai/v1'
+  LOGFARE_BASE_URL = 'https://ai.hackclub.com/proxy/v1'
   LOGFARE_DISABLE_THINKING = 'true'
-  LOGFARE_FALLBACK_MODELS = 'gemma-4-26b'
-  LOGFARE_MODEL = 'qwen-3.8-27b'
+  LOGFARE_FALLBACK_MODELS = 'deepseek/deepseek-chat,google/gemini-2.5-flash'
+  LOGFARE_MODEL = 'qwen/qwen3-32b'
   LOGFARE_REASONING_EFFORT = 'low'
   PORT = '3000'
 

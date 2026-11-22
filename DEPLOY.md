@@ -18,15 +18,13 @@ process, so an in-memory guard can never dedupe across them.
 
 | Variable | Purpose |
 | --- | --- |
-| `LOGFARE_API_KEY` | Logfare key (`lfu_...`). **Secret.** |
+| `LOGFARE_API_KEY` | Hack Club AI key (sign in at https://ai.hackclub.com). **Secret.** The `LOGFARE_*` names are historical — the values are Hack Club / OpenRouter. |
 | `DATABASE_URL` | Postgres connection string. Must be Supabase's **pooler** (port 6543). |
-| `LOGFARE_BASE_URL` | Defaults to `https://logfare.ai/v1`. |
-| `LOGFARE_MODEL` | Defaults to `deepseek-v4.1-flash-1017`. |
-| `LOGFARE_FALLBACK_MODELS` | Comma-separated Logfare model IDs in failover order. The Fly config uses `qwen-3.8-27b,glm-5.3`; leave empty to disable extra models. |
-| `LOGFARE_REASONING_EFFORT` | Defaults to the model's own. The default model reasons optionally and defaults to `high`; the deployment pins `low`. |
-| `LOGFARE_VISUAL_MODEL` | Draws the simulation. Falls back to `LOGFARE_MODEL`. |
-| `LOGFARE_LESSON_MODEL` | Writes the formalization and worked examples. Falls back to `LOGFARE_MODEL`. |
-| `LOGFARE_REVIEW_MODEL` | Reviews the finished card against its own simulation and the notes, and patches what is wrong. Falls back to `LOGFARE_MODEL`. Keep this one short-prompt: it is sent a ~10k-character digest, because past roughly that size the gateway answers 200 with an empty body. |
+| `LOGFARE_BASE_URL` | Defaults to `https://ai.hackclub.com/proxy/v1` (Hack Club, an OpenAI-compatible proxy of OpenRouter). |
+| `LOGFARE_MODEL` | OpenRouter slug. Defaults to `qwen/qwen3-32b`. |
+| `LOGFARE_FALLBACK_MODELS` | Comma-separated OpenRouter slugs in failover order. The Fly config uses `deepseek/deepseek-chat,google/gemini-2.5-flash`; leave empty to disable extra models. |
+| `LOGFARE_REASONING_EFFORT` | Caps hidden reasoning on hybrid models (`low` here). Sent only when set, dropped automatically if a model rejects the field. |
+| `LOGFARE_REVIEW_MODEL` | Optional separate reviewer model (OpenRouter slug). Falls back to `LOGFARE_MODEL`. Keep it fast — the review runs inside the 300s route next to the other passes. |
 
 `DATABASE_URL` must be the **pooler** connection string, not the direct one.
 Each serverless invocation opens its own connection, so the direct port (5432)
@@ -48,7 +46,8 @@ Run `db/schema.sql` once against the database. It is idempotent and creates
    Do **not** use the direct `db.<ref>.supabase.co:5432` string.
 3. **Import the repo into Vercel.** Framework is auto-detected as Next.js.
 4. **Set env vars** (Settings → Environment Variables): `DATABASE_URL`,
-   `LOGFARE_API_KEY`, optionally `LOGFARE_MODEL`.
+   `LOGFARE_API_KEY` (your Hack Club AI key), optionally
+   `LOGFARE_MODEL` / `LOGFARE_FALLBACK_MODELS` (OpenRouter slugs).
 5. **Deploy**, then verify (below).
 
 ### Vercel gotchas
@@ -107,7 +106,7 @@ fly ips allocate-v6 -a clickpoint
 
 # The LLM key and the database. Neither is in the repo; the app cannot
 # generate a pathway without them.
-fly secrets set LOGFARE_API_KEY=lfu_... -a clickpoint
+fly secrets set LOGFARE_API_KEY=<hackclub-key> -a clickpoint
 fly secrets set DATABASE_URL=postgresql://...pooler...:6543/postgres -a clickpoint
 ```
 

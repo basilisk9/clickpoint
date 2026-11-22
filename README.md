@@ -14,6 +14,15 @@ Upload notes. Get a Duolingo-style pathway. Learn the card. Survive the checkpoi
 
 Open [http://localhost:3000](http://localhost:3000)
 
+Set `LOGFARE_MODEL` to your first choice. In `.env.local` or your host's environment,
+set `LOGFARE_FALLBACK_MODELS` to an ordered, comma-separated list of Logfare model
+IDs (for example, `qwen-3.8-27b,glm-5.3`). Leave it empty for no extra models.
+A model outage or rate limit advances to the next candidate; subsequent calls on
+the same server instance prefer healthy models for 60 seconds before trying the
+primary again. If a validation error names an invalid or unsupported request option
+(such as `temperature`), Clickpoint removes that option and retries the same model.
+It does not remove `model` or `messages`. An invalid API key still fails immediately.
+
 ## Flow
 
 1. Landing page (`/`): what the product is, plus a live pathway preview

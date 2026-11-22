@@ -1,11 +1,10 @@
 const DEFAULT_BASE = "https://logfare.ai/v1";
 const DEFAULT_MODEL = "deepseek-v4.1-flash-1017";
-const DEFAULT_FALLBACK_MODELS = "";
-
-// Retryable calls loop forever until one succeeds (see chat/chatJson): a
-// failure retries with backoff instead of ever being given up on. The only
-// escape is a non-retryable error (401/403/404), which cannot be fixed by
-// retrying, so we throw immediately rather than loop on a guaranteed loss.
+// Per-process cooldown: prefer a healthy backup on subsequent calls, then
+// probe the configured primary again. A cooling model is still a last resort.
+const MODEL_COOLDOWN_MS = 60_000;
+const unavailableUntil = new Map<string, number>();
+const unsupportedFields = new Map<string, Set<string>>();
 const RETRY_BASE_DELAY_MS = 900;
 // Cap on the exponential-backoff exponent, so a long outage settles on a
 // steady ~1 min retry instead of growing without bound.
@@ -116,21 +115,34 @@ type CallResult =
       ok: false;
       model: string;
       status: number | null;
-      retryable: boolean;
+      action: "retry" | "unavailable" | "incompatible" | "fatal";
       error: string;
       elapsedMs: number;
     };
 
-function isRetryableStatus(status: number) {
-  return status === 408 || status === 429 || status >= 500;
+function modelKey(config: ModelConfig, model: string) {
+  return `${config.baseUrl}\n${model}`;
+}
+
+function failureAction(status: number, detail: string) {
+  if (status === 401 || status === 403) return "fatal";
+  if (status === 404 || (status === 429 && /limit_source|free.?tier|daily.?limit/i.test(detail))) {
+    return "unavailable";
+  }
+  if (status === 408 || status === 429 || status >= 500) return "retry";
+  if (status === 400 || status === 422) {
+    if (/model_not_found|unknown model|invalid model|model[^\n]{0,100}(?:not found|unavailable|does not exist)/i.test(detail)) {
+      return "unavailable";
+    }
+    if (/unsupported[_ ](?:parameter|value)|not supported (?:with|by|for) this model|context_length_exceeded/i.test(detail)) {
+      return "incompatible";
+    }
+  }
+  return "fatal";
 }
 
 function parseFallbacks(primary: string): string[] {
-  const raw = process.env.LOGFARE_FALLBACK_MODELS;
-  // An explicitly empty value is how you switch fallbacks off.
-  if (raw !== undefined && raw.trim() === "") return [];
-
-  const list = (raw ?? DEFAULT_FALLBACK_MODELS)
+  const list = (process.env.LOGFARE_FALLBACK_MODELS ?? "")
     .split(",")
     .map((name) => name.trim())
     .filter((name) => name.length > 0 && name !== primary);
@@ -143,7 +155,7 @@ function getConfig(): ModelConfig {
   if (!apiKey) {
     throw new Error("LOGFARE_API_KEY is missing. Paste your Logfare key into .env.local.");
   }
-  const model = process.env.LOGFARE_MODEL || DEFAULT_MODEL;
+  const model = process.env.LOGFARE_MODEL?.trim() || DEFAULT_MODEL;
   return {
     apiKey,
     baseUrl: (process.env.LOGFARE_BASE_URL || DEFAULT_BASE).replace(/\/$/, ""),
@@ -346,6 +358,36 @@ function withTimeout<T>(work: Promise<T>, ms: number, label: string): Promise<T>
   });
 }
 
+// Read the rejected option from the diagnostic, not a list of model quirks.
+// Only optional fields are in `fields`; model and messages cannot be removed.
+function rejectedField(detail: string, fields: Record<string, unknown>) {
+  let param: unknown;
+  let code: unknown;
+  let message = detail;
+  try {
+    const body = JSON.parse(detail);
+    const error = body?.error ?? body;
+    param = error?.param;
+    code = error?.code;
+    if (typeof error === "string") message = error;
+    else if (typeof error?.message === "string") message = error.message;
+  } catch { /* Some gateways send plain text. */ }
+  // E.g. "Invalid parameter: 'x'", "Invalid value for parameter `x`",
+  // or "Parameter 'x' is not supported". Other options mentioned in the
+  // explanation (such as a suggested replacement) aren't the rejected one.
+  const named = message.match(/\b(?:invalid|unsupported|unknown|unrecognized|unexpected)\s+(?:parameter|argument|field|keyword argument|value(?:\s+for(?:\s+(?:parameter|argument|field))?)?)\b\s*[:=]?\s*['"`]?([a-z_]\w*(?:\.\w+)*)/i)
+    ?? message.match(/\b([a-z_]\w*(?:\.\w+)*)['"`]?\s+(?:(?:is|was)\s+)?(?:invalid|unsupported|not supported|not allowed|unrecognized)\b/i)
+    ?? message.match(/\bdoes not support\s+(?:the\s+)?(?:parameter\s+)?['"`]?([a-z_]\w*(?:\.\w+)*)/i);
+  const invalid = named || /invalid|unsupported|not supported|unrecognized|only the default/i.test(message) ||
+    code === "unsupported_parameter" || code === "unsupported_value";
+  if (!invalid) return;
+  const path = typeof param === "string" && param ? param : named?.[1];
+  const name = path?.split(".")[0];
+  if (!name || !Object.hasOwn(fields, name)) return;
+  // A bad value doesn't mean the field is unsupported for future requests.
+  return { name, remember: code === "unsupported_parameter" || /\b(?:unsupported|unknown) parameter\b/i.test(message) };
+}
+
 async function performRequest(
   config: ModelConfig,
   model: string,
@@ -354,23 +396,20 @@ async function performRequest(
   timeoutMs: number,
 ): Promise<CallResult> {
   const began = Date.now();
-  // Reasoning models spend most of a large max_tokens budget on hidden
-  // reasoning. Ask for thinking off, but keep a plain request as the second
-  // variant so a provider that rejects the hint still gets served.
-  const variants: Array<Record<string, unknown>> = config.disableThinking
-    ? [{ chat_template_kwargs: { enable_thinking: false } }, {}]
-    : [{}];
-  // Effort is capped per deployment, but a provider that rejects the field
-  // must still be served, so it is dropped on a 400 like the hint above.
-  if (config.reasoningEffort) {
-    variants.forEach((variant) => {
-      variant.reasoning = { effort: config.reasoningEffort };
-    });
+  const key = modelKey(config, model);
+  const fields: Record<string, unknown> = {
+    temperature: options.temperature ?? 0.4,
+    max_tokens: options.maxTokens ?? 8000,
+  };
+  if (config.disableThinking) fields.chat_template_kwargs = { enable_thinking: false };
+  if (config.reasoningEffort) fields.reasoning = { effort: config.reasoningEffort };
+  for (const name of unsupportedFields.get(key) ?? []) {
+    delete fields[name];
   }
 
-  let rejection = "";
-
-  for (const extra of variants) {
+  // Each compatibility retry removes a present field and shares the deadline.
+  const signal = AbortSignal.timeout(timeoutMs);
+  for (;;) {
     const started = Date.now();
     const response = await fetch(`${config.baseUrl}/chat/completions`, {
       method: "POST",
@@ -378,14 +417,8 @@ async function performRequest(
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: options.temperature ?? 0.4,
-        max_tokens: options.maxTokens ?? 8000,
-        ...extra,
-      }),
-      signal: AbortSignal.timeout(timeoutMs),
+      body: JSON.stringify({ model, messages, ...fields }),
+      signal,
     });
 
     if (process.env.LOGFARE_DEBUG === "true") {
@@ -394,7 +427,7 @@ async function performRequest(
           Date.now() - started
         }ms (timeout ${timeoutMs}ms, max_tokens ${
           options.maxTokens ?? 8000
-        }, thinking ${Object.keys(extra).length > 0 ? "off" : "on"}).`,
+        }, thinking ${fields.chat_template_kwargs ? "off" : "default"}).`,
       );
     }
 
@@ -403,24 +436,26 @@ async function performRequest(
       const error = `Logfare ${response.status} on ${model}: ${
         detail.slice(0, 300) || response.statusText
       }`;
-      // A 400 while carrying the thinking-off hint usually means the provider
-      // does not know that parameter. Drop it and ask again before failing.
-      if (response.status === 400 && Object.keys(extra).length > 0) {
-        rejection = error;
-        continue;
+      if (response.status === 400 || response.status === 422) {
+        const rejected = rejectedField(detail, fields);
+        if (rejected) {
+          const { name, remember } = rejected;
+          if (remember) {
+            const known = unsupportedFields.get(key) ?? new Set<string>();
+            known.add(name);
+            unsupportedFields.set(key, known);
+          }
+          delete fields[name];
+          continue;
+        }
       }
-      // OpenRouter-style gateways signal an exhausted daily free-tier quota
-      // (429 with a limit_source like openrouter_free_tier_daily). Unlike a
-      // transient shared-pool 429 it will not clear within seconds, so do not
-      // burn the backoff attempts on this model — move down the chain.
-      const hardLimit =
-        response.status === 429 &&
-        /limit_source|free.?tier|daily.?limit/i.test(detail);
+      // Permanent model failures leave this call's chain; shared request or
+      // credential errors must not be retried against every configured model.
       return {
         ok: false,
         model,
         status: response.status,
-        retryable: hardLimit ? false : isRetryableStatus(response.status),
+        action: failureAction(response.status, detail),
         error,
         elapsedMs: Date.now() - began,
       };
@@ -451,7 +486,7 @@ async function performRequest(
         ok: false,
         model,
         status: null,
-        retryable: true,
+        action: "retry",
         error: `Logfare returned no text from ${servedBy}${detail}.`,
         elapsedMs: Date.now() - began,
       };
@@ -459,15 +494,6 @@ async function performRequest(
 
     return { ok: true, content, model: servedBy };
   }
-
-  return {
-    ok: false,
-    model,
-    status: 400,
-    retryable: false,
-    error: rejection || `Every request variant was rejected by ${model}.`,
-    elapsedMs: Date.now() - began,
-  };
 }
 
 async function callModel(
@@ -490,7 +516,7 @@ async function callModel(
       ok: false,
       model,
       status: null,
-      retryable: true,
+      action: "retry",
       error: `Logfare request failed on ${model}: ${message}`,
       elapsedMs: Date.now() - began,
     };
@@ -507,12 +533,20 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
   }
   /* An explicit model leads the chain; the configured default remains the
      fallback so a bad model name degrades instead of failing the card. */
-  const primary = options.model || config.model;
+  const primary = options.model?.trim() || config.model;
   const chain = [
     primary,
     ...config.fallbacks.filter((name) => name !== primary),
     ...(primary === config.model ? [] : [config.model]),
   ];
+  const now = Date.now();
+  const candidates: string[] = [];
+  const cooling: string[] = [];
+  for (const model of chain) {
+    const until = unavailableUntil.get(modelKey(config, model)) ?? 0;
+    (until > now ? cooling : candidates).push(model);
+  }
+  candidates.push(...cooling);
 
   // Tokens actually wanted. It starts at the caller's budget, grows when a
   // failure looks like truncation, and shrinks when a failure looks like a
@@ -522,24 +556,10 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
   let wantedTokens = options.maxTokens ?? 8000;
   let shrink = false;
 
-  // Every retryable failure loops the whole chain again and again until one
-  // model actually answers. attempt counts retries across all models so the
-  // backoff keeps growing through a long outage, and modelIndex only advances
-  // when the current model's own request fails, so we round-robin the chain.
   let attempt = 0;
   let modelIndex = 0;
-  let lastErrorMessage = "no attempt made";
-
-  // Forever is intentional: the call does not resolve until it succeeds or
-  // hits a non-retryable error. That is what "retry until it doesn't fail"
-  // means. The runtime bound is the surrounding request timeout, not this loop.
   for (;;) {
-    if (options.maxAttempts && attempt >= options.maxAttempts) {
-      throw new Error(
-        `Gave up after ${attempt} attempts: ${lastErrorMessage}`,
-      );
-    }
-    const model = chain[modelIndex % chain.length];
+    const model = candidates[modelIndex];
 
     const attemptOptions: ChatOptions = {
       ...options,
@@ -568,6 +588,7 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
     );
 
     if (result.ok) {
+      unavailableUntil.delete(modelKey(config, model));
       if (attempt > 0 || shrink) {
         console.warn(
           `[clickpoint] ${result.model} answered after ${attempt} retries.`,
@@ -576,11 +597,16 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
       return result.content;
     }
 
-    lastErrorMessage = result.error;
-    // A 401/403/404 will not fix itself by retrying or switching models, so
-    // this is the only way out of the loop other than success.
-    if (!result.retryable) {
-      throw new Error(result.error);
+    attempt += 1;
+    if (result.action === "fatal") throw new Error(result.error);
+    if (chain.length > 1 && result.action !== "incompatible") {
+      unavailableUntil.set(modelKey(config, model), Date.now() + MODEL_COOLDOWN_MS);
+    }
+    if (result.action === "retry") modelIndex += 1;
+    else candidates.splice(modelIndex, 1);
+    if (!candidates.length) throw new Error(result.error);
+    if (options.maxAttempts && attempt >= options.maxAttempts) {
+      throw new Error(`Gave up after ${attempt} attempts: ${result.error}`);
     }
 
     const cutoff =
@@ -608,23 +634,23 @@ export async function chat(messages: ChatMessage[], options: ChatOptions = {}) {
       wantedTokens = Math.min(wantedTokens * 2, MAX_TOKEN_CEILING);
     }
 
-    // A shared-pool 429 is telling us to stand down; a sub-second retry just
-    // adds to the congestion it was rate-limited for. Every other failure
-    // backs off exponentially, capped so a long outage settles on ~1 min.
-    const delay =
-      result.status === 429
+    // Try each remaining candidate immediately. Back off only before a
+    // second pass through models that failed transiently.
+    const endOfPass = modelIndex === candidates.length;
+    if (endOfPass) modelIndex = 0;
+    let delay = 0;
+    if (endOfPass) {
+      delay = result.status === 429
         ? 4000 + Math.floor(Math.random() * 4000)
-        : RETRY_BASE_DELAY_MS *
-            2 ** Math.min(attempt, MAX_BACKOFF_EXPONENT) +
+        : RETRY_BASE_DELAY_MS * 2 ** Math.min(attempt - 1, MAX_BACKOFF_EXPONENT) +
           Math.floor(Math.random() * 250);
-    attempt += 1;
-    modelIndex += 1;
+    }
     console.warn(
       `[clickpoint] ${result.error}${
         cutoff ? " Asking for a tighter regeneration." : ""
-      } Retry #${attempt} on ${chain[modelIndex % chain.length]} in ${delay}ms.`,
+      } Retry #${attempt} on ${candidates[modelIndex]} in ${delay}ms.`,
     );
-    await sleep(delay);
+    if (delay) await sleep(delay);
   }
 }
 

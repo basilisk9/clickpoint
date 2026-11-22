@@ -22,6 +22,7 @@ process, so an in-memory guard can never dedupe across them.
 | `DATABASE_URL` | Postgres connection string. Must be Supabase's **pooler** (port 6543). |
 | `LOGFARE_BASE_URL` | Defaults to `https://logfare.ai/v1`. |
 | `LOGFARE_MODEL` | Defaults to `deepseek-v4.1-flash-1017`. |
+| `LOGFARE_FALLBACK_MODELS` | Comma-separated Logfare model IDs in failover order. The Fly config uses `qwen-3.8-27b,glm-5.3`; leave empty to disable extra models. |
 | `LOGFARE_REASONING_EFFORT` | Defaults to the model's own. The default model reasons optionally and defaults to `high`; the deployment pins `low`. |
 | `LOGFARE_VISUAL_MODEL` | Draws the simulation. Falls back to `LOGFARE_MODEL`. |
 | `LOGFARE_LESSON_MODEL` | Writes the formalization and worked examples. Falls back to `LOGFARE_MODEL`. |
